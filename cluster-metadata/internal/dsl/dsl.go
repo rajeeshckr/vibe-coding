@@ -84,8 +84,8 @@ func Run(dsl func()) *ClusterMetadata {
 
 // --- DSL Functions ---
 
-// Tags defines the tags section.
-func Tags(dsl func()) {
+// TagsDef defines the tags section.
+func TagsDef(dsl func()) {
 	dsl()
 }
 
@@ -184,8 +184,8 @@ func SfnArm64(dsl func()) {
 	inTag(Definition.Tags.BaseNames.SfnArm64, dsl)
 }
 
-// Vars defines the vars section.
-func Vars(dsl func()) {
+// VarsDef defines the vars section.
+func VarsDef(dsl func()) {
 	dsl()
 }
 
@@ -207,14 +207,21 @@ func SandboxEksAmd64Ami(dsl func()) {
 	inTag(Definition.Vars.SandboxEksAmd64Ami, dsl)
 }
 
-// Cluster defines a new cluster.
-func Cluster(name string, dsl func()) {
-	cluster := &Cluster{Name: name}
+// ClusterDef defines a new cluster.
+func ClusterDef(dsl func()) {
+	cluster := &Cluster{}
 	Definition.Clusters = append(Definition.Clusters, cluster)
 	inCluster(cluster, dsl)
 }
 
 // --- Attribute setters ---
+
+// Name sets the name for the current cluster.
+func Name(val string) {
+	if currentCluster != nil {
+		currentCluster.Name = val
+	}
+}
 
 // Partition sets the partition for the current cluster.
 func Partition(val string) {

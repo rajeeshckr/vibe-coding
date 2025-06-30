@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log"
 
-	. "github.com/rajeeshckr/vibe-coding/cluster-metadata/dsl"
+	. "github.com/rajeeshckr/vibe-coding/cluster-metadata/internal/dsl"
 )
 
 var Design = Run(func() {
-	Tags(func() {
+	TagsDef(func() {
 		AmiRevisionMain("1f5915df9330551ceb673d198d7ec2c458d6e3a8")
 		AmiRevisionBranch("1990f8966675bd0bdf9172e916eca2739303a4f1")
 
@@ -57,7 +57,7 @@ var Design = Run(func() {
 		})
 	})
 
-	Vars(func() {
+	VarsDef(func() {
 		// This shows how to reuse definitions, similar to YAML anchors.
 		// We get the definitions from the already-processed `Tags` section
 		// by accessing the exported `Definition` object from the dsl package.
@@ -83,7 +83,8 @@ var Design = Run(func() {
 		})
 	})
 
-	Cluster("pod998", func() {
+	ClusterDef(func() {
+		Name("pod998")
 		Partition("pod998")
 	})
 })
