@@ -1,0 +1,3266 @@
+tags:
+  # `kube_cluster_info.rb` looks up AMI tags to find the AMI ID
+  # the below tags provide a simpler way to compose a set of tags
+  # For example, since the AMI we want for `sandbox_amd64_ami` is tagged with
+  # {
+  #  "BaseName": "ubuntu22.04_k8s_base_singlemount",
+  #  "Branch": "foo",
+  #  "Environment": "staging",
+  #  "Hostgroup": "k8s-singlemount",
+  #  "KubernetesRelease": "1.31",
+  #  "Revision": "deadbeef",
+  #  "Platform": "ubuntu-22.04"
+  # }
+  # Note: You can verify the tags by looking at the build manifests in compute_amis
+  #
+  # We can use any of the following tags to find the AMI:
+  # ```
+  #   sandbox_amd64_ami:
+  #     <<: [*production_ami_env, *default_amd64_platform, *chef_provider, *ami_revision_main]
+  # ```
+  # or we can use
+  # ```
+  #   sandbox_amd64_ami:
+  #     <<: [*default_sfn_amd64, *production_ami_env, *ami_revision_main]
+  # ```
+  # or even just by defining the tags manually
+  # ```
+  #   sandbox_amd64_ami:
+  #     BaseName: ubuntu22.04_k8s_base_singlemount_arm64
+  #     Revision: a111186845ea48f7ab7880a454c58a98f871393b
+  #     Environment: staging
+  #     Hostgroup: k8s-singlemount
+  #     Platform: ubuntu-22.04
+  # ```
+
+  # AMI revision is the commit hash which was used to build the AMI
+  # via compute_amis
+  ami_revision_main: &ami_revision_main { Revision: "1f5915df9330551ceb673d198d7ec2c458d6e3a8" }
+  ami_revision_branch: &ami_revision_branch { Revision: "1990f8966675bd0bdf9172e916eca2739303a4f1" }
+  envs:
+    # the environment tag is used to select either the staging or production AMI
+    production_ami_env: &production_ami_env { Environment: production }
+    staging_ami_env: &staging_ami_env { Environment: staging }
+  providers:
+    chef: &chef_provider { Hostgroup: k8s-singlemount }
+    eks: &eks_provider { Hostgroup: k8s-eks }
+  platforms:
+    ubuntu_22_04:
+      arm64: &default_arm64_platform { Platform: ubuntu-graviton-22.04 }
+      amd64: &default_amd64_platform { Platform: ubuntu-22.04 }
+  base_names:
+    # base names are the `name` of the AMIS
+    # https://github.com/zendesk/compute_amis/blob/39a84c2b3ade8a7ec32cb45ad247325b7b597ac6/packer/configuration.libsonnet#L7-L29
+    eks_arm64: &default_eks_arm64 { BaseName: ubuntu22.04_eks_base_arm }
+    eks_amd64: &default_eks_amd64 { BaseName: ubuntu22.04_eks_base }
+    sfn_amd64: &default_sfn_amd64 { BaseName: ubuntu22.04_k8s_base_singlemount }
+    sfn_arm64: &default_sfn_arm64 { BaseName: ubuntu22.04_k8s_base_singlemount_arm }
+vars:
+  # AMI to use (override with AMI_NAME when using rake boostrap:test_ami)
+  # <% raise "use AMI_NAME=" if (ENV.keys & ["UBUNTU_AMI_NAME", "UBUNTU_ARM_AMI_NAME", "UBUNTU_EKS_AMI_NAME", "UBUNTU_EKS_ARM_AMI_NAME"]).any? %>
+
+  # phase-sandbox
+  sandbox_amd64_ami: &sandbox_amd64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount_cgroupv2
+
+  sandbox_arm64_ami: &sandbox_arm64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount_arm_cgroupv2
+
+  sandbox_eks_amd64_ami: &sandbox_eks_amd64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_eks_base_cgroupv2
+
+  sandbox_eks_arm64_ami: &sandbox_eks_arm64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_eks_base_arm_cgroupv2
+
+  # phase-0 -> phase-1
+  staging_amd64_ami: &staging_amd64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount_cgroupv2
+
+  staging_arm64_ami: &staging_arm64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount_arm_cgroupv2
+
+  staging_eks_amd64_ami: &staging_eks_amd64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_eks_base_cgroupv2
+
+  staging_eks_arm64_ami: &staging_eks_arm64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_eks_base_arm_cgroupv2
+
+  # phase-2
+  canary_amd64_ami: &canary_amd64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount
+
+  canary_arm64_ami: &canary_arm64_ami
+    <<: [*production_ami_env, *ami_revision_main]
+    BaseName: ubuntu22.04_k8s_base_singlemount_arm
+
+  # phase-3 -> phase-5
+  production_amd64_ami: &production_amd64_ami
+    <<: [*default_sfn_amd64, *production_ami_env, *ami_revision_main]
+
+  production_arm64_ami: &production_arm64_ami
+    <<: [*default_sfn_arm64, *production_ami_env, *ami_revision_main]
+
+  production_eks_amd64_ami: &production_eks_amd64_ami
+    <<: [*default_eks_amd64, *production_ami_env, *ami_revision_main]
+
+  production_eks_arm64_ami: &production_eks_arm64_ami
+    <<: [*default_eks_arm64, *production_ami_env, *ami_revision_main]
+
+
+  # chef cookbooks
+  sandbox_cookbook_url: &sandbox_cookbook_url <%= ENV['COOKBOOK_URL'].to_json %>
+  staging_cookbook_url: &staging_cookbook_url <%= ENV['COOKBOOK_URL'].to_json %>
+  production_cookbook_url: &production_cookbook_url <%= ENV['COOKBOOK_URL'].to_json %>
+
+  # traditionally set by compute_ami cookbook
+  api_taints: &api_taints
+    - node-role.kubernetes.io/control-plane:NoSchedule
+
+  # traditionally set by compute_ami cookbook
+  etcd_taints: &etcd_taints
+    - ownedby=compute:NoExecute
+
+  node_ssd_taints: &node_ssd_taints
+    - compute.zende.sk/nodegroup=node-ssd:NoSchedule
+
+  node_ssd_x_taints: &node_ssd_x_taints
+    - compute.zende.sk/nodegroup=node-ssd-x:NoSchedule
+
+  # Check README if customizing list of instance types.
+  sandbox_instance_types_api: &sandbox_instance_types_api
+    - m7g.2xlarge
+    - m6g.2xlarge
+
+  nvidia_gpu_instance_types: &nvidia_gpu_instance_types
+    - g4dn.xlarge # NVIDIA T4 (16GB)
+    - g4dn.2xlarge # NVIDIA T4 (16GB)
+
+  nvidia_gpu_batch_instance_types: &nvidia_gpu_batch_instance_types
+    - g6e.2xlarge # NVIDIA L40S (48GB)
+    - g6.2xlarge # NVIDIA L4 (24GB)
+    - g5.2xlarge # NVIDIA A10G (24GB)
+    - g4dn.2xlarge # NVIDIA T4 (16GB)
+
+  nvidia_gpu_batch_instance_types_no6e: &nvidia_gpu_batch_instance_types_no6e
+    - g6.2xlarge # NVIDIA L4 (24GB)
+    - g5.2xlarge # NVIDIA A10G (24GB)
+    - g4dn.2xlarge # NVIDIA T4 (16GB)
+
+  nvidia_gpu_batch_instance_types_no6: &nvidia_gpu_batch_instance_types_no6
+    - g5.2xlarge # NVIDIA A10G (24GB)
+    - g4dn.2xlarge # NVIDIA T4 (16GB)
+
+  nvidia_gpu_batch_instance_types_no56: &nvidia_gpu_batch_instance_types_no56
+    - g4dn.2xlarge # NVIDIA T4 (16GB)
+    - g4dn.4xlarge # NVIDIA T4 (16GB)
+    - g4dn.8xlarge # NVIDIA T4 (16GB)
+
+  nvidia_gpu_instance_types_large: &nvidia_gpu_instance_types_large
+    - g4dn.12xlarge
+    - g4dn.2xlarge
+
+  staging_spot_instance_types_node: &staging_spot_instance_types_node
+    - m7i-flex.2xlarge # only 5% interruption rate and 67% discount
+    - t3.2xlarge # 5% interruption
+    - m7i.2xlarge  # cheaper than m6i.2xlarge (63% discount vs 53%)
+    - m6i.2xlarge # 15-20% interruption
+
+  scooter_instance_types_node: &scooter_instance_types_node
+    # The current m5.12xlarge node is hitting IP exhaustion errors.
+    # Also prefer smaller nodes due to cost overhead
+    # Scooter prefers last generation instances for cost savings
+    - m6i.4xlarge
+    - m6i.8xlarge
+    - m6i.12xlarge
+    - m5.4xlarge
+    - m5.8xlarge
+    - m5.12xlarge
+
+  scooter_instance_types_node_arm64: &scooter_instance_types_node_arm64
+    # The current m5.12xlarge node is hitting IP exhaustion errors.
+    # Also prefer smaller nodes due to cost overhead
+    - m7g.4xlarge
+    - m7g.8xlarge
+    - m7g.12xlarge
+    - m6g.4xlarge
+    - m6g.8xlarge
+    - m6g.12xlarge
+
+  scooter_instance_types_node_ssd: &scooter_instance_types_node_ssd
+    - m6id.4xlarge
+    - m6id.8xlarge
+    - m6id.12xlarge
+    - m5d.4xlarge
+    - m5d.8xlarge
+    - m5d.12xlarge
+
+  instance_types_node_ga_runner: &instance_types_node_ga_runner
+    - c6i.4xlarge
+    - m6i.4xlarge
+    - c7i.4xlarge
+    - m7i.4xlarge
+
+  internaltools_instance_types_node: &internaltools_instance_types_node
+    - m6i.12xlarge
+    - m5.12xlarge
+    - m7i.12xlarge
+    - m6i.16xlarge
+
+  # staging can use smaller instance types to improve binpacking, but prod has pods that would not fit
+  staging_internaltools_instance_types_node: &staging_internaltools_instance_types_node
+  - m6i.8xlarge
+  - m5.8xlarge
+  - m6i.12xlarge
+  - m5.12xlarge
+  - m7i.12xlarge
+  - m6i.16xlarge
+
+  staging_instance_types_etcd: &staging_instance_types_etcd
+    - m6g.xlarge
+    - m7g.xlarge
+
+  8gb_etcd_instance_types: &8gb_etcd_instance_types
+    - c6g.4xlarge
+    - c7g.4xlarge
+
+  staging_instance_types_etcd_events: &staging_instance_types_etcd_events
+    - m6g.xlarge
+    - m7g.xlarge
+
+  staging_instance_types_api: &staging_instance_types_api
+    - m7g.4xlarge
+    - m6g.4xlarge
+
+  # eks control-plane nodegroups use less resources than sfn
+  # given that we don't run static control-plane pods on them
+  staging_eks_instance_types_api: &staging_eks_instance_types_api
+    - m7g.xlarge
+    - m6g.xlarge
+    - m7g.2xlarge
+    - m6g.2xlarge
+
+  # Api servers in scooter cluster are using > 50G of memory which exhausts node memory. Using higher memory instance types
+  scooter_instance_types_api: &scooter_instance_types_api
+    - m7g.8xlarge
+    - m6g.8xlarge
+    - m7g.12xlarge
+    - m6g.12xlarge
+
+  staging_instance_types_arm64_node: &staging_instance_types_arm64_node
+    - m7g.16xlarge
+    - m7g.12xlarge
+    - m7g.8xlarge
+    - m6g.16xlarge
+    - m6g.12xlarge
+    - m6g.8xlarge
+
+  staging_instance_types_small_arm64_node: &staging_instance_types_small_arm64_node
+    - m7g.4xlarge
+    - m7g.2xlarge
+    - m6g.4xlarge
+    - m6g.2xlarge
+
+  # zorg has to be run on instances that has more than 16 vcpus, due to an unknown constraint on Nginx CPU usage
+  # we run small instances since each pod runs on it's own node via topology spread
+  staging_instance_types_zorg_node: &staging_instance_types_zorg_node
+    - c6i.4xlarge
+    - c5.4xlarge
+    - m6i.4xlarge
+    - m5.4xlarge
+    - r6i.4xlarge
+    - r5.4xlarge
+
+  sell_dmz_instance_types_ingress_node: &sell_dmz_instance_types_ingress_node
+    - m7g.xlarge
+    - m8g.xlarge
+    - m6g.xlarge
+    - m7g.2xlarge
+    - m8g.2xlarge
+    - m6g.2xlarge
+    - c7g.xlarge
+    - c8g.xlarge
+    - c6g.xlarge
+  
+  sell_dmz_instance_types_arm64_node: &sell_dmz_instance_types_arm64_node
+    - m8g.4xlarge
+    - m8g.8xlarge
+    - m8g.12xlarge
+    - m8g.16xlarge
+    - m7g.4xlarge
+    - m7g.8xlarge
+    - m7g.12xlarge
+    - m7g.16xlarge
+    - m6g.4xlarge
+    - m6g.8xlarge
+    - m6g.12xlarge
+    - m6g.16xlarge
+
+  staging_instance_types_node: &staging_instance_types_node
+    - m6i.16xlarge
+    - m6i.12xlarge
+    - m6i.8xlarge
+    - m5.12xlarge
+    - m5.8xlarge
+
+  staging_instance_types_node_small: &staging_instance_types_node_small
+    - m6i.4xlarge # prefer m6i since it's cheaper than m7i
+    - m7i.4xlarge
+    - m6i.8xlarge
+    - m7i.8xlarge
+    - m5.4xlarge # don't fallback on m5 unless we have to
+    - m5.8xlarge
+
+  staging_instance_types_arm64_node_fallback: &staging_instance_types_arm64_node_fallback
+    - m6i.16xlarge
+    - m6i.12xlarge
+    - m6i.8xlarge
+    - m5.12xlarge
+    - m5.8xlarge
+
+  production_instance_types_etcd: &production_instance_types_etcd
+    - m6g.xlarge
+    - m7g.xlarge
+
+  production_instance_types_api: &production_instance_types_api
+    - m7g.4xlarge
+    - m6g.4xlarge # we noticed quite bad CPU performance on m6g.4xlarge so moving it below m7g (2025/4/9)
+    - c6g.4xlarge
+    - c7g.4xlarge
+
+  # zorg has to be run on instances that has more than 16 vcpus, due to an unknown constraint on Nginx CPU usage
+  production_instance_types_zorg_node: &production_instance_types_zorg_node
+    - c6i.4xlarge
+    - c5.4xlarge
+    - m6i.4xlarge
+    - m5.4xlarge
+    - r6i.4xlarge
+    - r5.4xlarge
+
+  # Pod23 is a special partition for zorg because of smooch/sunco:
+  # - most of traffic goes through pod23 (singleton architecture)
+  # - sunco namespace typically has 4-6x the number of k-pods (450 in pod23 vs 100 in pod25 vs 70 in pod20)
+  # memory: uses ~14gb and spikes up to 23gb
+  # cpu: vector's zorg-agent consumes 5+ cpu cores for processing logs
+  production_instance_types_zorg_node_xl: &production_instance_types_zorg_node_xl
+    - c6i.8xlarge
+    - c5.9xlarge
+    - m6i.8xlarge
+    - m5.8xlarge
+    - r6i.8xlarge
+    - r5.8xlarge
+
+  production_instance_types_arm64_node: &production_instance_types_arm64_node
+    - m7g.16xlarge
+    - m7g.12xlarge
+    - m7g.8xlarge
+    - m6g.16xlarge
+    - m6g.12xlarge
+    - m6g.8xlarge
+
+  instance_types_m8g_arm64_node: &instance_types_m8g_arm64_node
+    - m8g.16xlarge
+    - m8g.12xlarge
+    - m8g.8xlarge
+    - m7g.16xlarge
+    - m7g.12xlarge
+    - m7g.8xlarge
+    - m6g.16xlarge
+    - m6g.12xlarge
+    - m6g.8xlarge
+
+  # graviton workloads running in internaltools request a lot more memory
+  # e.g. automatix requests 150Gi of Memory, and 4 cores
+  staging_instance_types_m8g_arm64_node_internaltools: &staging_instance_types_m8g_arm64_node_internaltools
+    - r8g.8xlarge
+    - r7g.8xlarge
+    - r6g.8xlarge
+    - r8g.12xlarge
+    - r7g.12xlarge
+    - r6g.12xlarge
+
+  # pod30 is based in ap-northeast-3 which doesnt have access to m7gs
+  pod30_instance_types_arm64_node: &pod30_instance_types_arm64_node
+    - m6g.16xlarge
+    - m6g.12xlarge
+    - m6g.8xlarge
+
+  # pod30 is based in ap-northeast-3 which doesnt have access to m7gs
+  pod30_instance_types_etcd_arm64: &pod30_instance_types_etcd_arm64
+    - m6g.xlarge
+    - r6g.xlarge
+    - m6g.2xlarge
+
+  # classic mail-ticket-creator requests 73Gi of RAM across all containers.
+  # avoiding the use of the 4xlarge instance types as they only support
+  # 5Gb/s baseline network performance (with bursting to 10Gb/s) which can cause
+  # noisy neighbour issues with network intensive workloads.
+  instance_types_s3nat_node: &instance_types_s3nat_node
+    - m7g.8xlarge
+    - m7g.12xlarge
+    - m7g.16xlarge
+    - m6g.8xlarge
+    - m6g.12xlarge
+    - m6g.16xlarge
+    - r7g.8xlarge
+    - r7g.12xlarge
+    - r6g.8xlarge
+    - r6g.12xlarge
+
+  # cloudflare-observability requests around 8 cores and it runs in POD13 only
+  # so we need more cpu cores when compared to rest of production clusters
+  pod13_instance_types_s3nat_node: &pod13_instance_types_s3nat_node
+    - m8g.8xlarge
+    - m7g.8xlarge
+    - m6g.8xlarge
+    - m8g.12xlarge
+    - m7g.12xlarge
+    - m6g.12xlarge
+    - r8g.8xlarge
+    - r7g.8xlarge
+    - r6g.8xlarge
+
+  # pod30 (ap-northeast-3) which doesnt have access to m7g/m8gs
+  pod30_instance_types_s3nat_node: &pod30_instance_types_s3nat_node
+    - m6g.8xlarge
+    - m6g.12xlarge
+    - m6g.16xlarge
+    - r6g.4xlarge
+    - r6g.8xlarge
+    - r6g.12xlarge
+
+  # runs data-platform-airflow for cross-region s3 access
+  internaltools_instance_types_s3nat_node: &internaltools_instance_types_s3nat_node
+    - c8g.4xlarge
+    - c7g.4xlarge
+    - c6g.4xlarge
+    - m8g.4xlarge
+    - m7g.4xlarge
+    - m6g.4xlarge
+    - c8g.8xlarge
+    - c7g.8xlarge
+    - c6g.8xlarge
+
+  # not m5.16xlarge+ or m6i.24xlarge+ since they have 2 separate cores which leads to context shredding
+  # (processes were rescheduled on other physical cores which affected significantly memory access latencies)
+  # get core count with `lscpu | grep "NUMA|Socket"`
+  # MemoryManager (similar to CPU Manager) allows to set NUMA affinity for pods (only for Guaranteed pods)
+  # but we do not use that atm
+  production_instance_types_node: &production_instance_types_node
+    - m6i.16xlarge
+    - m6i.12xlarge
+    - m6i.8xlarge
+    - m5.12xlarge
+    - m5.8xlarge
+
+  production_instance_types_arm64_node_fallback: &production_instance_types_arm64_node_fallback
+    - m6i.16xlarge
+    - m6i.12xlarge
+    - m6i.8xlarge
+    - m5.12xlarge
+    - m5.8xlarge
+
+  # explore engine-worker-background has over 100 replicas in production
+  # with cpu:memory ratio of 1:20, hence the memory-optimized nodes
+  production_explore_instance_types_node: &production_explore_instance_types_node
+    - r6i.8xlarge
+    - r6i.4xlarge
+    - r5.8xlarge
+    - r5.4xlarge
+
+  production_explore_instance_types_node_arm64: &production_explore_instance_types_node_arm64
+    - r8g.8xlarge
+    - r7g.8xlarge
+    - r6g.8xlarge
+    - r8g.4xlarge
+    - r7g.4xlarge
+    - r6g.4xlarge
+    - r8g.12xlarge
+    - r7g.12xlarge
+    - r6g.12xlarge
+
+  karpenter_config: &karpenter_config
+    provider: karpenter
+    karpenterConfig:
+      disruption: &karpenter_config_disruption
+        consolidationPolicy: "WhenEmptyOrUnderutilized"
+        consolidateAfter: "10m"
+        budgets:
+          - reasons:
+              - "Underutilized"
+            nodes: "10%"
+          - reasons:
+              - "Empty"
+            nodes: "100%"
+
+  # explore's consolidation is a bit more aggressive
+  # to ensure that nodes are not underutilized for too long
+  # explore etl pipelines are one-off jobs that run for a few minutes/hours
+  explore_karpenter_config: &explore_karpenter_config
+    <<: *karpenter_config
+    karpenterConfig:
+      disruption:
+        <<: *karpenter_config_disruption
+        consolidateAfter: "5m"
+        budgets:
+          - reasons:
+              - "Underutilized"
+            nodes: "25%"
+          - reasons:
+              - "Empty"
+            nodes: "100%"
+
+  spot_config: &spot_config
+    # See AWS doc for full details - https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-autoscaling-autoscalinggroup-instancesdistribution.html#cfn-autoscaling-autoscalinggroup-instancesdistribution-ondemandbasecapacity
+    # OnDemandBaseCapacity defaults to 0.
+    # `on_demand_above_base_percentage` defines what % above OnDemandBaseCapacity should be on demand vs spot
+    # 0 - all above OnDemandBaseCapacity is spot.
+    # 100 - all above OnDemandBaseCapacity is ondemand
+    on_demand_above_base_percentage: 0
+    # options are lowest-price capacity-optimized-prioritized and capacity-optimized
+    # capacity-optimized-prioritized "honors the instance type priorities on a best-effort basis but optimizes for capacity first."
+    # that is, the ASG is more likely to launch the higher priority instance types
+    spot_allocation_strategy: capacity-optimized-prioritized
+
+  podded_eni_config: &podded_eni_config
+    sg_stack_name: security-groups
+    sg_logical_name: AppEc2SecurityGroup
+    zorg_pod_subnet_tag: K8S-CNI-Zorg-Pods-Subnet
+    # s3nat subnets were initially created for Exodus for cross-region S3 access,
+    # given that you cannot access s3 in another region via PrivateLink.
+    # Later, Fdn Network decided to move Network intensive workloads to s3nat
+    # as part of a cost savings initiative. This was made possible in 2024 by Fdn Network
+    # managing NAT Instances and retiring the managed NAT Gateways.
+    s3nat_pod_subnet_tag: K8S-CNI-S3nat2-Pods-Subnet
+
+  4gb_etcd_values: &4gb_etcd_values
+    max_db_size: 4294967296 # 4GB
+    mem_request: 8Gi
+    mem_limit: 12Gi
+
+  podded_prod_cluster_etcd_values: &podded_prod_cluster_etcd_values
+    max_db_size: 4294967296 # 4GB
+
+  8gb_etcd_values: &8gb_etcd_values
+    max_db_size: 8589934592 # 8GB
+    mem_request: 16Gi
+    mem_limit: 20Gi
+
+  zorg_nodegroup: &zorg_nodegroup
+    chef_role: k8s_node
+    min_size: 3
+    max_size: 20
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    consul:
+      use_cache: false
+    additional_ssh_teams: [ edge ]
+    amd64_instance_types: *production_instance_types_zorg_node
+    type: zorg
+    extra_labels:
+      ownedby: zorg
+    taints:
+      - ownedby=zorg:NoExecute
+    default_attributes:
+      zendesk_kubernetes:
+        kubelet:
+          # Increased to 1Gi to allow Vector to catch up on zorg logs (decision made as part of Access Logs EAP in 2023)
+          container_log_max_size: "1Gi"  # kubernetes default is 10Mi
+          container_log_max_files: 10    # kubernetes default is 5
+
+  staging_zorg_nodegroup: &staging_zorg_nodegroup
+    <<: *zorg_nodegroup
+    amd64_instance_types: *staging_instance_types_zorg_node
+    drain_timeout: 2h
+    root_ebs_size: "100"
+    default_attributes:
+      zendesk_kubernetes:
+        # https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/#options
+        kubelet:
+          # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+          # TLDR; Send whole log files to S3 to process in batch rather than millions of messages
+          container_log_max_size: "100Mi" # kubernetes default is 10Mi
+          container_log_max_files: 10     # kubernetes default is 5
+
+  arm_nodegroup: &arm_nodegroup
+    chef_role: k8s_node
+    min_size: 4
+    max_size: 50
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    launch_template_overrides:
+      - machine_image:
+          tags: *production_arm64_ami
+        instance_types: *production_instance_types_arm64_node
+        arch: arm64
+      - machine_image:
+          tags: *production_amd64_ami
+        instance_types: *production_instance_types_arm64_node_fallback
+        arch: amd64
+    taints:
+      - compute.zende.sk/nodegroup=node-arm:NoSchedule
+
+  # NGO currently doesn't support `launch_template_overrides` for EKS
+  # ref: https://github.com/zendesk/nodegroup-operator/blob/3ba51bca7e6ce874313da867e0f290a13e80e974/api/v1alpha2/nodegroup_deployment_webhook.go#L282
+  eks_arm64_nodegroup: &eks_arm64_nodegroup
+    chef_role: k8s_node
+    min_size: 1
+    max_size: 50
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    drain_timeout: 1h
+    arm64_instance_types: *staging_instance_types_arm64_node
+    taints:
+      - compute.zende.sk/nodegroup=node-arm:NoSchedule
+
+  # - only available in certain regions
+  #   us-east-1 eu-central-1 us-east-2 us-west-2 eu-west-2 as of writing (Feb 2025)
+  #   recheck via `aws-exec production bundle exec rake capacity:plan INSTANCE_TYPE=m8g.16xlarge MAX=5`
+  # - costs 10% more but is 20% faster than m7g, so classic/hc need to tune their requests after rollout or we pay more
+  staging_m8g_arm64_nodegroup: &staging_m8g_arm64_nodegroup
+    <<: *arm_nodegroup
+    min_size: 1
+    max_size: 50
+    drain_timeout: 1h
+    launch_template_overrides:
+      - machine_image:
+          tags: *staging_arm64_ami
+        instance_types: *instance_types_m8g_arm64_node
+        arch: arm64
+      - machine_image:
+          tags: *staging_amd64_ami
+        instance_types: *staging_instance_types_arm64_node_fallback
+        arch: amd64
+
+  # partitions like internaltools-staging-use1 do not have a lot of
+  # Graviton workloads so we're starting with small instances, but optimizing for
+  # memory optimized.
+  staging_m8g_arm64_nodegroup_internaltools: &staging_m8g_arm64_nodegroup_internaltools
+    <<: *staging_m8g_arm64_nodegroup
+    launch_template_overrides:
+      - machine_image:
+          tags: *staging_arm64_ami
+        instance_types: *staging_instance_types_m8g_arm64_node_internaltools
+        arch: arm64
+
+  sell_dmz_staging_arm64_nodegroup: &sell_dmz_staging_arm64_nodegroup
+    <<: *staging_m8g_arm64_nodegroup
+    min_size: 0 # in the process of migrating workloads to graviton
+    launch_template_overrides:
+      - machine_image:
+          tags: *staging_arm64_ami
+        instance_types: *sell_dmz_instance_types_arm64_node
+        arch: arm64
+      - machine_image:
+          tags: *staging_amd64_ami
+        instance_types: *staging_instance_types_arm64_node_fallback
+        arch: amd64
+
+  sell_dmz_production_arm64_nodegroup: &sell_dmz_production_arm64_nodegroup
+    <<: *arm_nodegroup
+    launch_template_overrides:
+      - machine_image:
+          tags: *production_arm64_ami
+        instance_types: *production_instance_types_arm64_node
+        arch: arm64
+      - machine_image:
+          tags: *production_amd64_ami
+        instance_types: *production_instance_types_arm64_node_fallback
+        arch: amd64
+
+  production_m8g_arm64_nodegroup: &production_m8g_arm64_nodegroup
+    <<: *arm_nodegroup
+    launch_template_overrides:
+    - machine_image:
+        tags: *production_arm64_ami
+      instance_types: *instance_types_m8g_arm64_node
+      arch: arm64
+    - machine_image:
+        tags: *production_amd64_ami
+      instance_types: *production_instance_types_arm64_node_fallback
+      arch: amd64
+
+  # pod30 is based in ap-northeast-3 which doesn't have access to m7gs
+  pod30_arm64_nodegroup: &pod30_arm64_nodegroup
+    <<: *arm_nodegroup
+    min_size: 3
+    launch_template_overrides:
+      - machine_image:
+          tags: *production_arm64_ami
+        instance_types: *pod30_instance_types_arm64_node
+        arch: arm64
+      - machine_image:
+          tags: *production_amd64_ami
+        instance_types: *production_instance_types_arm64_node_fallback
+        arch: amd64
+
+  node_nodegroup: &node_nodegroup
+    min_size: 3
+    max_size: 200
+    scale_down_grace_period: 1h # perhaps good to be less than drain_timeout
+    amd64_instance_types: *production_instance_types_node
+
+  scooter_eks_node_nodegroup: &scooter_eks_node_nodegroup
+    min_size: 1
+    max_size: 150
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    drain_timeout: 1h
+    root_ebs_iops: "4750"
+    root_ebs_throughput: "150" # MiB/s
+    amd64_instance_types: *scooter_instance_types_node
+
+  scooter_nodegroup_shared: &scooter_nodegroup_shared
+    chef_role: k8s_node
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    root_ebs_iops: "4750"
+    root_ebs_throughput: "150" # MiB/s node-arm on scooter often exceeds 125 MiB/s
+    min_size: 0
+    max_size: 150
+    taints:
+      - compute.zende.sk/nodegroup=node-arm:NoSchedule
+    default_attributes:
+      zendesk_kubernetes:
+        kubelet:
+          container_log_max_size: 20Mi
+
+  scooter_arm64_nodegroup: &scooter_arm64_nodegroup
+    <<: *scooter_nodegroup_shared
+    # only SFN supports launch template overrides
+    launch_template_overrides:
+      - machine_image:
+          tags: *production_arm64_ami
+        instance_types: *scooter_instance_types_node_arm64
+        arch: arm64
+
+  scooter_eks_arm64_nodegroup: &scooter_eks_arm64_nodegroup
+    <<: *scooter_nodegroup_shared
+    drain_timeout: 1h
+    arm64_instance_types: *scooter_instance_types_node_arm64
+
+  s3nat_nodegroup: &s3nat_nodegroup
+    chef_role: k8s_node
+    min_size: 1
+    max_size: 20
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    arm64_instance_types: *instance_types_s3nat_node
+    taints:
+      - compute.zende.sk/nodegroup=s3nat:NoSchedule
+
+  node_spot_nodegroup: &node_spot_nodegroup
+    chef_role: k8s_node
+    min_size: 0
+    max_size: 10
+    amd64_instance_types: regional_spot_instance_types
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    drain_timeout: 1h
+    taints:
+      - compute.zende.sk/nodegroup=node-spot:NoSchedule
+    spot_config: *spot_config
+
+  node_spot_nodegroup_karpenter: &node_spot_nodegroup_karpenter
+    <<: *node_spot_nodegroup
+    <<: *karpenter_config
+
+  chef_node_arm64_spot_nodegroup_karpenter: &chef_node_arm64_spot_nodegroup_karpenter
+    <<: *node_spot_nodegroup
+    <<: *karpenter_config
+    taints:
+      - compute.zende.sk/nodegroup=node-arm-spot:NoSchedule
+    amd64_instance_types: null
+    arm64_instance_types: *production_instance_types_arm64_node
+
+  staging_chef_node_arm64_spot_nodegroup_karpenter: &staging_chef_node_arm64_spot_nodegroup_karpenter
+    <<: *chef_node_arm64_spot_nodegroup_karpenter
+    arm64_instance_types: *staging_instance_types_arm64_node
+
+  staging_eks_node_nodegroup: &staging_eks_node_nodegroup
+    min_size: 1
+    max_size: 10
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    drain_timeout: 1h
+    amd64_instance_types: *staging_instance_types_node
+
+  etcd_nodegroup: &etcd_nodegroup
+    autoscale: false
+    arm64_instance_types: *production_instance_types_etcd
+    type: etcd
+    extra_labels:
+      node.kubernetes.io/exclude-from-external-load-balancers: "true"
+      ownedby: compute
+    taints: *etcd_taints
+
+  etcd_events_nodegroup: &etcd_events_nodegroup
+    <<: *etcd_nodegroup
+    type: etcd-events
+
+  staging_etcd_nodegroup: &staging_etcd_nodegroup
+    <<: *etcd_nodegroup
+    arm64_instance_types: *staging_instance_types_etcd
+    root_ebs_size: "100"
+
+  api_nodegroup: &api_nodegroup
+    autoscale: false
+    drain_timeout: 1h
+    arm64_instance_types: *production_instance_types_api
+    taints: *api_taints
+    service_account_key_pairs:
+      - secret_name: "service-accounts-keypair-20230216"
+        is_signing: true
+
+  eks_control_plane_nodegroup: &eks_control_plane_nodegroup
+    <<: *api_nodegroup
+    drain_timeout: 15m
+    root_ebs_size: "100"
+    arm64_instance_types: *staging_eks_instance_types_api
+    amd64_instance_types: null # can only set one of arm64 or amd64
+
+  scooter_api_nodegroup: &scooter_api_nodegroup
+    <<: *api_nodegroup
+    drain_timeout: 15m
+    arm64_instance_types: *scooter_instance_types_api
+    root_ebs_size: "100"
+    root_ebs_iops: "4750"
+    root_ebs_throughput: "125" # MiB/s
+
+  staging_consul: &staging_consul
+    acl_datacenter: usw2-staging-pod998
+    acl_default_token: 2b4d09aa-ce9a-1c60-97f0-448119765bb5
+
+  # All clusters use same usw2 Consul Datacenter as ACL.
+  # each Consul DC replicates ACL rules and tokens from usw2 locally.
+  # in the event that ACLs cannot be resolved from usw2 or the local leader
+  # the acl_down_policy will allow any existing tokens to continue accessing Consul without being able to validate them
+  # References:
+  # https://github.com/zendesk/cloud_amis/blob/master/packer/files/consul_server/consul.conf.json#L41-L42
+  # https://www.consul.io/docs/agent/options#acl_down_policy
+  # https://www.consul.io/docs/agent/options#enable_acl_replication
+  production_consul: &production_consul
+    acl_datacenter: usw2
+    acl_default_token: c4ede4f2-b56e-a7a6-6081-804cf27bc211
+
+  staging_core_nodegroups: &staging_core_nodegroups
+    etcd-member:
+      <<: *etcd_nodegroup
+      arm64_instance_types: *staging_instance_types_etcd
+      root_ebs_size: "100"
+
+    etcd-events-member:
+      <<: *etcd_events_nodegroup
+      arm64_instance_types: *staging_instance_types_etcd
+      root_ebs_size: "100"
+
+    api:
+      <<: *api_nodegroup
+      drain_timeout: 15m
+      root_ebs_size: "100"
+      arm64_instance_types: *staging_instance_types_api
+
+  production_core_nodegroups: &production_core_nodegroups
+    etcd-member: *etcd_nodegroup
+    etcd-events-member: *etcd_events_nodegroup
+    api: *api_nodegroup
+
+  sandbox_nodegroups: &sandbox_nodegroups
+    <<: *staging_core_nodegroups
+    etcd-member:
+      <<: *etcd_nodegroup
+      root_ebs_size: "100"
+    etcd-events-member:
+      <<: *etcd_events_nodegroup
+      root_ebs_size: "100"
+    api:
+      <<: *api_nodegroup
+      drain_timeout: 15m
+      root_ebs_size: "100"
+      arm64_instance_types: *sandbox_instance_types_api
+    node:
+      max_size: 10
+      scale_down_grace_period: 30s # prompt scale down after draining completed
+      drain_timeout: 1h
+      amd64_instance_types: *staging_spot_instance_types_node
+      spot_config: *spot_config
+    # while sandbox runs on spot, we run node-spot for spot testing (scales to zero)
+    node-spot: *node_spot_nodegroup_karpenter
+    node-arm-spot: *staging_chef_node_arm64_spot_nodegroup_karpenter
+
+  # base nodegroups used for building a cluster using partition orchestrator
+  eks_base_nodegroups: &eks_base_nodegroups
+    control-plane: *eks_control_plane_nodegroup
+    node: *staging_eks_node_nodegroup
+    node-arm: *eks_arm64_nodegroup
+
+  scooter_eks_base_nodegroups: &scooter_eks_base_nodegroups
+    control-plane:
+      <<: *eks_control_plane_nodegroup
+      root_ebs_iops: "4750" # overwrite the api values as these are eks 'control plane' nodegroups
+      root_ebs_throughput: "125" # MiB/s
+    node:
+      <<: *scooter_eks_node_nodegroup
+    node-arm:
+      <<: *scooter_eks_arm64_nodegroup
+
+  staging_nodegroups: &staging_nodegroups
+    <<: *staging_core_nodegroups
+    node:
+      <<: *node_nodegroup
+      min_size: 1
+      max_size: 40
+      drain_timeout: 1h
+      amd64_instance_types: *staging_instance_types_node
+    s3nat-node: &staging_s3nat_nodegroup
+      <<: *s3nat_nodegroup
+      drain_timeout: 2h
+      root_ebs_size: "100"
+    zorg-node:
+      <<: *staging_zorg_nodegroup
+    node-spot:
+      <<: *node_spot_nodegroup
+    node-arm-spot:
+      <<: *staging_chef_node_arm64_spot_nodegroup_karpenter
+    node-arm:
+      <<: *arm_nodegroup
+      min_size: 1
+      max_size: 50
+      drain_timeout: 1h
+      launch_template_overrides:
+        - machine_image:
+            tags: *staging_arm64_ami
+          instance_types: *staging_instance_types_arm64_node
+          arch: arm64
+        - machine_image:
+            tags: *staging_amd64_ami
+          instance_types: *staging_instance_types_arm64_node_fallback
+          arch: amd64
+
+  eks_staging_nodegroups: &eks_staging_nodegroups
+    <<: *eks_base_nodegroups
+    s3nat-node:
+      <<: *staging_s3nat_nodegroup
+      min_size: 0
+    zorg-node:
+      <<: *staging_zorg_nodegroup
+      min_size: 0
+    node-spot: *node_spot_nodegroup
+
+  explore_node_ssd_nodegroup: &explore_node_ssd_nodegroup
+    <<: *eks_arm64_nodegroup # running node-ssd on graviton
+    root_ebs_size: "40"
+    # since the subnets are almost filled, a rollout will fill the pod
+    # subnets completely. Setting this to 30m to allow already drained
+    # nodes to be removed to make space for new pods.
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    min_size: 0
+    # to alleviate spark executor oom issues with spark jobs,
+    # we are doubling the mem limit and need extra memory on the nodes.
+    # this is a temporary measure while we tune spark conf / jvm settings.
+    # sync with up @zendesk/nautilus-sunbeams before changing these
+    arm64_instance_types: &explore_node_ssd_nodegroup_arm6464_instance_types
+      - r6gd.16xlarge # prefer older gen for reduced cost (spark is more network/mem intensive)
+      - r7gd.16xlarge
+      - r6gd.12xlarge
+      - r7gd.12xlarge
+      - r6gd.8xlarge
+      - r7gd.8xlarge
+      - m6gd.16xlarge
+      - m7gd.16xlarge
+      - m6gd.12xlarge
+      - m7gd.12xlarge
+      - m6gd.8xlarge
+      - m7gd.8xlarge
+    taints: *node_ssd_taints
+    # etl pipelines for initial load can take 3 hours
+    drain_timeout: 4h
+
+  explore_node_ssd_x_nodegroup_arm6464_instance_types: &explore_node_ssd_x_nodegroup_arm6464_instance_types
+    - x2gd.16xlarge
+    - x2gd.12xlarge
+    - x2gd.8xlarge
+
+  explore_node_ssd_x_nodegroup: &explore_node_ssd_x_nodegroup
+    <<: *explore_node_ssd_nodegroup
+    taints: *node_ssd_x_taints
+    arm64_instance_types:
+      - *explore_node_ssd_x_nodegroup_arm6464_instance_types
+      - *explore_node_ssd_nodegroup_arm6464_instance_types
+
+  explore_nodegroups: &explore_nodegroups
+    control-plane: *eks_control_plane_nodegroup
+    node: *node_nodegroup
+    node-ssd: *explore_node_ssd_nodegroup
+
+  staging_explore_nodegroups: &staging_explore_nodegroups
+    <<: *explore_nodegroups
+    node:
+      min_size: 1
+      max_size: 20
+      drain_timeout: 1h
+      scale_down_grace_period: 30s # prompt scale down after draining completed
+      amd64_instance_types: *staging_instance_types_node_small
+    node-arm:
+      <<: *eks_arm64_nodegroup
+      min_size: 1
+      max_size: 50
+      drain_timeout: 1h
+      arm64_instance_types:
+        - m7g.4xlarge
+        - m8g.4xlarge
+        - m6g.4xlarge
+        - m7g.8xlarge
+        - m8g.8xlarge
+        - m6g.8xlarge
+    node-ssd: &staging_explore_node_ssd_nodegroup
+      <<: *explore_node_ssd_nodegroup
+      <<: *explore_karpenter_config
+      arm64_instance_types:
+        - r6gd.2xlarge
+        - r6gd.4xlarge
+        - r6gd.8xlarge
+        - r7gd.2xlarge
+        - r7gd.4xlarge
+        - r7gd.8xlarge
+        - m6gd.2xlarge
+        - m6gd.4xlarge
+        - m6gd.8xlarge
+        - m7gd.2xlarge
+        - m7gd.4xlarge
+        - m7gd.8xlarge
+        - x2gd.xlarge
+        - x2gd.2xlarge
+        - x2gd.4xlarge
+        - x2gd.8xlarge
+    node-ssd-spot:
+      <<: *staging_explore_node_ssd_nodegroup
+      <<: *explore_karpenter_config
+      arm64_instance_types: regional_ssd_spot_instance_types
+      spot_config: *spot_config
+      taints:
+      - compute.zende.sk/nodegroup=node-ssd-spot:NoSchedule
+
+  production_explore_nodegroups: &production_explore_nodegroups
+    <<: *explore_nodegroups
+    node:
+      min_size: 1
+      max_size: 20
+      drain_timeout: 4h
+      scale_down_grace_period: 30s # prompt scale down after draining completed
+      amd64_instance_types: *production_explore_instance_types_node
+    node-arm:
+      min_size: 1
+      max_size: 20
+      drain_timeout: 4h
+      scale_down_grace_period: 30s # prompt scale down after draining completed
+      arm64_instance_types: *production_explore_instance_types_node_arm64
+      taints:
+        - compute.zende.sk/nodegroup=node-arm:NoSchedule
+    node-ssd: &production_explore_node_ssd_nodegroup
+      <<: *explore_node_ssd_nodegroup
+      min_size: 20
+      max_size: 200
+    node-ssd-spot:
+      <<: *production_explore_node_ssd_nodegroup
+      arm64_instance_types: regional_ssd_spot_instance_types
+      spot_config: *spot_config
+      min_size: 0
+      taints:
+      - compute.zende.sk/nodegroup=node-ssd-spot:NoSchedule
+    node-ssd-x: *explore_node_ssd_x_nodegroup
+
+  nvidia_gpu_nodegroup: &nvidia_gpu_nodegroup
+    chef_role: k8s_node
+    min_size: 0
+    max_size: 100
+    scale_down_grace_period: 30s # prompt scale down after draining completed
+    enable_nvidia_container_runtime: true
+    amd64_instance_types: *nvidia_gpu_instance_types
+    taints:
+      - compute.zende.sk/nodegroup=node-nvidia-gpu:NoSchedule
+    extra_labels:
+      # tell cluster-autoscaler to work-around device plugin startup delay
+      # https://aws.github.io/aws-eks-best-practices/cluster-autoscaling/#accelerators
+      # https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md#special-note-on-gpu-instances
+      k8s.amazonaws.com/accelerator: "nvidia-tesla-t4"
+      # Tell Karpenter to not sync nodeclaim taints to the nodes during node initialization.
+      # This is to prevent a race condiiton where taints/startupTaints could be re-applied by Karpenter after removal by controllers (e.g. the convergence checker removes the KNM taint).
+      # https://github.com/kubernetes-sigs/karpenter/pull/2125
+      karpenter.sh/do-not-sync-taints: "true"
+    extra_tags: # only add as a tag, is an invalid label
+      # tell cluster-autoscaler to expect nodes to provide a `nvidia.com/gpu` resource
+      # (needed for scale from zero; exported by https://github.com/zendesk/nvidia-k8s-device-plugin/)
+      # update this value if the resources exported changes (e.g. multi-GPU per node,
+      # or if we enable resource sharing)
+      k8s.io/cluster-autoscaler/node-template/resources/nvidia.com/gpu: "1"
+
+  nvidia_gpu_nodegroup_spot: &nvidia_gpu_nodegroup_spot
+    <<: *nvidia_gpu_nodegroup
+    amd64_instance_types: regional_gpu_spot_instance_types
+    taints:
+      - compute.zende.sk/nodegroup=node-nvidia-gpu-spot:NoSchedule
+    spot_config: *spot_config
+    <<: *karpenter_config
+
+  nvidia_gpu_nodegroup_staging: &nvidia_gpu_nodegroup_staging
+    <<: *nvidia_gpu_nodegroup
+    <<: *karpenter_config
+
+  nvidia_gpu_nodegroup_production: &nvidia_gpu_nodegroup_production
+    <<: *nvidia_gpu_nodegroup
+    <<: *karpenter_config
+
+  nvidia_gpu_nodegroup_spot_staging: &nvidia_gpu_nodegroup_spot_staging
+    <<: *nvidia_gpu_nodegroup_spot
+    <<: *karpenter_config
+
+  nvidia_gpu_nodegroup_staging_large: &nvidia_gpu_nodegroup_staging_large
+    <<: *nvidia_gpu_nodegroup_staging
+    amd64_instance_types: *nvidia_gpu_instance_types_large
+    taints:
+      - compute.zende.sk/nodegroup=node-nvidia-gpu-large:NoSchedule
+
+  # TODO: Consolidate into nvidia_gpu_nodegroup after https://zendesk.atlassian.net/browse/CPLAT-1792 
+  nvidia_gpu_batch_nodegroup: &nvidia_gpu_batch_nodegroup
+    <<: *nvidia_gpu_nodegroup
+    <<: *karpenter_config
+    scale_down_grace_period: 1h
+    amd64_instance_types: *nvidia_gpu_batch_instance_types
+    taints:
+      - compute.zende.sk/nodegroup=node-nvidia-gpu-batch:NoSchedule
+    extra_labels:
+      # tell cluster-autoscaler to work-around device plugin startup delay
+      # https://aws.github.io/aws-eks-best-practices/cluster-autoscaling/#accelerators
+      # https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md#special-note-on-gpu-instances
+      k8s.amazonaws.com/accelerator: "nvidia-l40"
+
+  sandbox_values: &sandbox_values
+    env: staging
+    partition: sandbox
+    amd64_ami_tags: *sandbox_amd64_ami
+    arm64_ami_tags: *sandbox_arm64_ami
+    #  for quick cookbook pr testing go to compute_amis cookbook directory and run
+    #  aws-exec zendesk bundle exec rake berkshelf:upload
+    #  then paste the url here or set to null
+    cookbook_url: *sandbox_cookbook_url
+    node_rollout_batch_size: <%= ENV["NODE_ROLLOUT_BATCH_SIZE"] || "50%" %>
+    slack_channels: [compute-cluster-deploys-staging]
+    additional_security_groups:
+      default: [[security-groups, AllowConsul]]
+      node: [[security-groups, App]]
+    additional_ssh_teams: [engineering]
+    vpc_tags:
+      Name: us-west-2
+    eniconfig:
+      sg_stack_name: security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    nodegroups:
+      <<: *sandbox_nodegroups
+
+  scooter_values: &scooter_values
+    kube2iam_disabled:
+      - k8s-aws-rds-mysql-consul-tagger
+      - k8s-convergence-check
+
+  staging_values: &staging_values
+    env: staging
+    use_record_injector: 'true'
+    amd64_ami_tags: *staging_amd64_ami
+    arm64_ami_tags: *staging_arm64_ami
+    cookbook_url: *staging_cookbook_url
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+    node_rollout_batch_size: <%= ENV["NODE_ROLLOUT_BATCH_SIZE"] || "33%" %>
+    drain_timeout: 420
+    ssh_source_network: 172.16.0.0/12
+    etcd_client_network: 172.16.0.0/12
+    api_client_network: 172.16.0.0/12
+    node_source_network: 172.16.0.0/12
+    slack_channels: [compute-cluster-deploys-staging]
+    additional_security_groups:
+      default: [ [ security-groups, AllowConsul ] ]
+      node: [ [ security-groups, App ] ]
+    nodegroups: *staging_nodegroups
+    additional_ssh_teams: [ engineering, sandbox_staging ]
+    kube2iam_disabled: [k8s-convergence-check] # only for EKS
+
+  sandbox_eks_values: &sandbox_eks_values
+    amd64_ami_tags: *sandbox_eks_amd64_ami
+    arm64_ami_tags: *sandbox_eks_arm64_ami
+    kube2iam_disabled: []
+
+  staging_eks_values: &staging_eks_values
+    amd64_ami_tags: *staging_eks_amd64_ami
+    arm64_ami_tags: *staging_eks_arm64_ami
+    kube2iam_disabled: []
+
+  production_eks_values: &production_eks_values
+    amd64_ami_tags: *production_eks_amd64_ami
+    arm64_ami_tags: *production_eks_arm64_ami
+
+  production_nodegroups: &production_nodegroups
+    <<: *production_core_nodegroups
+    node: *node_nodegroup
+    s3nat-node: *s3nat_nodegroup
+    zorg-node: *zorg_nodegroup
+    node-arm: *arm_nodegroup
+    node-spot: *node_spot_nodegroup
+    node-arm-spot: *chef_node_arm64_spot_nodegroup_karpenter
+    node-nvidia-gpu: *nvidia_gpu_nodegroup_production
+    node-nvidia-gpu-spot: *nvidia_gpu_nodegroup_spot
+    node-nvidia-gpu-batch: *nvidia_gpu_batch_nodegroup
+
+  production_values: &production_values
+    env: production
+    use_record_injector: 'true'
+    amd64_ami_tags: *production_amd64_ami
+    arm64_ami_tags: *production_arm64_ami
+    cookbook_url: *production_cookbook_url
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+    node_rollout_batch_size: <%= ENV["NODE_ROLLOUT_BATCH_SIZE"] || "50%" %>
+    ssh_source_network: 10.0.0.0/8
+    etcd_client_network: 10.0.0.0/8
+    api_client_network: 10.0.0.0/8
+    node_source_network: 10.0.0.0/8
+    nodegroups:
+      <<: *production_nodegroups
+    slack_channels: [znoc-oncall]
+    additional_security_groups:
+      default: [ [ security-groups, AllowConsul ] ]
+      node: [ [ security-groups, App ] ]
+    additional_ssh_teams: []
+    kube2iam_disabled: [k8s-efs-csi-driver, k8s-kube-admission, k8s-convergence-check]
+
+  canary_values: &canary_values
+    <<: *production_values
+    amd64_ami_tags: *canary_amd64_ami
+    arm64_ami_tags: *canary_arm64_ami
+
+  sell_dmz_staging_account: &sell_dmz_staging_account
+    aws_profile: sell-dmz-staging
+    account_id: 171193327174
+
+  sell_dmz_production_account: &sell_dmz_production_account
+    aws_profile: sell-dmz-production
+    account_id: 625963972063
+
+  staging_account: &staging_account
+    aws_profile: staging
+    account_id: 589470546847
+
+  production_account: &production_account
+    aws_profile: production
+    account_id: 114712639188
+
+  scooter_account: &scooter_account
+    aws_profile: zendesk-scooter
+    account_id: 958272785712
+
+  explore_production_account: &explore_production_account
+    aws_profile: explore-production
+    account_id: 555186557071
+
+  explore_staging_account: &explore_staging_account
+    aws_profile: explore-staging
+    account_id: 463003357329
+
+  # see PR for details: https://github.com/zendesk/compute_amis/pull/1094
+  scooter_kubelet_flags: &scooter_kubelet_flags
+    registry_pull_qps: 50
+    registry_burst: 100
+
+  # note EKS clusters ignore these values, is controlled by compute_amis
+  # InPlacePodVerticalScaling: Allows us to experiment VPA scaling features on running pods without restarting them
+  # MultiCIDRServiceAllocator: Allows multiple CIDR blocks to be used for service ips
+  # DisableAllocatorDualWrite: Disable dual write to the old and new allocator at the same time (It can cause sporadic failures to provision services when MultiCIDRServiceAllocator is enabled)
+  feature_gates: &feature_gates 'InPlacePodVerticalScaling=true,MultiCIDRServiceAllocator=true,DisableAllocatorDualWrite=true'
+  feature_gates_scooter: &feature_gates_scooter 'CrossNamespaceVolumeDataSource=true'
+  # if you want to simulate future kubernetes versions, you can disabled apis with &runtime_config "batch/v1beta1=false,..."
+  # you can also enable apis with "batch/v1beta1=true,..."
+  runtime_config: &runtime_config "networking.k8s.io/v1beta1=true" # re-enabling networking for the MultiCIDRServiceAllocator feature gate
+
+clusters:
+
+  #
+  # Test clusters
+  #
+  - name: ami-integration-test
+    <<: *sandbox_values
+    <<: *staging_eks_values
+    # override for sandbox_values
+    partition: ami-integration-test
+    env: staging
+    vpc_id: vpc-0cd139f78bf3617af
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups:
+      # we don't want to run any full-time worker nodes here as they are spun up by integration tests, just the "control plane" nodes
+      control-plane: *eks_control_plane_nodegroup
+    eniconfig:
+      sg_stack_name: ami-integration-test-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ ami-integration-test-security-groups, AllowConsul ] ]
+      node: [ [ ami-integration-test-security-groups, App ] ]
+    aws_profile: cna-test-partition
+    account_id: 234464136914
+    arm64_ami_tags: *staging_eks_arm64_ami
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    provider: eks
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/DC83D026619AFB5160EBD65E1611CAD6
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+      kubernetes.io/cluster/ami-integration-test: shared
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2
+      join_cluster: [consul.usw2.zdsystest.com]
+
+  - name: sandbox
+    <<: *sandbox_values
+    <<: *staging_account
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    use_nlb: 'true'
+    vpn_cidrs:
+      - "10.220.0.0/18" # https://github.com/zendesk/config-service-data/blob/master/context/network/foundation_vpn.yml#L1
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.211.128.0/18"
+      - "10.164.0.0/17" # allow access from new internal tools cluster.
+    create_legacy_lb: 'false'
+    use_record_injector: 'true'
+    ssh_source_network: 172.30.0.0/12
+    etcd_client_network: 172.30.128.0/17
+    api_client_network: 172.16.0.0/12
+    node_source_network: 172.30.128.0/17
+    nodegroups:
+      <<: *sandbox_nodegroups
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_staging
+        max_size: 4
+
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot_staging
+        max_size: 4
+      node-nvidia-gpu-large:
+        <<: *nvidia_gpu_nodegroup_staging_large
+        max_size: 4
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+      KubernetesCluster: sandbox
+    etcd_az_names:
+      - us-west-2a
+      - us-west-2a
+      - us-west-2b
+      - us-west-2b
+      - us-west-2c
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2-staging-pod998
+      join_cluster: [consul.usw2.zdsystest.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          service_cidr: 172.29.4.0/22
+          cpu_request: 2
+          extra_flags:
+            goaway-chance: "0.001"
+            runtime-config: *runtime_config
+        kubelet:
+          enable_containerd_image_registry: true
+        kube_proxy:
+          method: 'daemonset'
+        cluster: sandbox
+        etcd:
+          state: existing
+        etcd-events:
+          state: existing
+        feature_gates: *feature_gates
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+
+  - name: sandbox-eks
+    <<: *sandbox_values
+    <<: *staging_account
+    <<: *sandbox_eks_values
+    nodegroups:
+      <<: *eks_base_nodegroups
+      node:
+        <<: *staging_eks_node_nodegroup
+        amd64_instance_types: *staging_spot_instance_types_node
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_staging
+        max_size: 4
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot_staging
+        max_size: 4
+    use_record_injector: 'false'
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    provider: eks
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/EE48160309002A28CA4821D3D7CFC1DE
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+      kubernetes.io/cluster/sandbox-eks: shared
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2-staging-pod998
+      join_cluster: [consul.usw2.zdsystest.com]
+
+  #
+  # Explore clusters
+  #
+  - name: explore-dev-1
+    partition: explore-dev-1
+    <<: *staging_values
+    <<: *explore_staging_account
+    <<: *staging_eks_values
+    vpc_tags:
+      Name: explore-dev-1-vpc
+    nodegroups: *staging_explore_nodegroups
+    eniconfig:
+      sg_stack_name: explore-dev-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ explore-dev-1-security-groups, AllowConsul ] ]
+      node: [ [ explore-dev-1-security-groups, App ] ]
+    aws_profile: explore-staging
+    account_id: 463003357329
+    immutable_eni: true
+    use_record_injector: 'false'
+    region: eu-west-1
+    dns_zone: explore.euw1.zdsystest.com
+    provider: eks
+    azs:
+      - eu-west-1a
+      - eu-west-1b
+      - eu-west-1c
+    oidc_provider: https://oidc.eks.eu-west-1.amazonaws.com/id/8E3B364BCD6B24608F33CE93DFC0D8CA
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+      kubernetes.io/cluster/explore-dev-1: shared
+    consul_config:
+      <<: *staging_consul
+      datacenter: consul-datacenter-name
+      join_cluster: [consul.usw2.zdsystest.com]
+
+  - name: explore-stg-use1-1
+    <<: *staging_values
+    <<: *explore_staging_account
+    <<: *staging_eks_values
+    # override for sandbox_values
+    partition: explore-stg-use1-1
+    env: staging
+    vpc_id: vpc-0fcf8c7cb0c0e8b96
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups: *staging_explore_nodegroups
+    eniconfig:
+      sg_stack_name: explore-stg-use1-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+      # trying to test out expanded pod subnet in staging to see if we have issues. #inc-2024-10-30-b
+      node_ssd_pod_subnet_tag: K8S-CNI-Pods-Subnet-Expanded
+    additional_security_groups:
+      default: [ [ explore-stg-use1-1-security-groups, AllowConsul ] ]
+      node: [ [ explore-stg-use1-1-security-groups, App ] ]
+    aws_profile: explore-staging
+    account_id: 463003357329
+    use_record_injector: 'false'
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: use1.zdsystest.com
+    provider: eks
+    azs:
+      - us-east-1a
+      - us-east-1b
+      - us-east-1c
+    oidc_provider: https://oidc.eks.us-east-1.amazonaws.com/id/0EFBDE66669DED5A5E29B9516F8BFB72
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet-Expanded
+      kubernetes.io/cluster/explore-stg-use1-1: shared
+
+  - name: explore-prd-euw1-1
+    <<: *sandbox_values
+    <<: *production_eks_values
+    # override for sandbox_values
+    partition: explore-prd-euw1-1
+    env: production
+    vpc_id: vpc-0a0f8d01ac3e3d696
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups: *production_explore_nodegroups
+    max_surge_percent: 0 # create a single node in the new nodegroup
+    eniconfig:
+      sg_stack_name: explore-prd-euw1-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+      # regular rails app runs on node group with /22 per az
+      # but spark pipelines that run on node-ssd can run thousands of pods
+      # so we created a dedicated /19 per az (expanded)
+      node_ssd_pod_subnet_tag: K8S-CNI-Pods-Subnet-Expanded
+    additional_security_groups:
+      default: [ [ explore-prd-euw1-1-security-groups, AllowConsul ] ]
+      node: [ [ explore-prd-euw1-1-security-groups, App ] ]
+    aws_profile: explore-production
+    account_id: 555186557071
+    use_record_injector: 'false'
+    immutable_eni: true
+    region: eu-west-1
+    dns_zone: euw1.zdsys.com
+    provider: eks
+    azs:
+      - eu-west-1a
+      - eu-west-1b
+      - eu-west-1c
+    oidc_provider: https://oidc.eks.eu-west-1.amazonaws.com/id/5D4D94FBCDCBFCE160085C4C76291F9C
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet-Expanded
+      kubernetes.io/cluster/explore-prd-euw1-1: shared
+    consul_config:
+      <<: *production_consul
+      datacenter: euw1
+      join_cluster: [consul.euw1.zdsys.com]
+
+  - name: explore-prd-use1-1
+    <<: *sandbox_values
+    <<: *production_eks_values
+    # override for sandbox_values
+    partition: explore-prd-use1-1
+    max_surge_percent: 0 # create a single node in the new nodegroup
+    env: production
+    vpc_id: vpc-0639733ac3d5213f4
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups: *production_explore_nodegroups
+    eniconfig:
+      sg_stack_name: explore-prd-use1-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+      # regular rails app runs on node group with /22 per az
+      # but spark pipelines that run on node-ssd can run thousands of pods
+      # so we created a dedicated /19 per az (expanded)
+      node_ssd_pod_subnet_tag: K8S-CNI-Pods-Subnet-Expanded
+    additional_security_groups:
+      default: [ [ explore-prd-use1-1-security-groups, AllowConsul ] ]
+      node: [ [ explore-prd-use1-1-security-groups, App ] ]
+    aws_profile: explore-production
+    account_id: 555186557071
+    use_record_injector: 'false'
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: use1.zdsys.com
+    provider: eks
+    azs:
+      - us-east-1a
+      - us-east-1b
+      - us-east-1c
+    oidc_provider: https://oidc.eks.us-east-1.amazonaws.com/id/B196E560B3D974B8F50A989A4375C822
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet-Expanded
+      kubernetes.io/cluster/explore-prd-use1-1: shared
+    consul_config:
+      <<: *production_consul
+      datacenter: use1
+      join_cluster: [consul.use1.zdsys.com]
+
+  #
+  # Sell DMZ clusters
+  #
+  - name: sell-dmz-staging
+    partition: sell-dmz-staging
+    <<: *staging_values
+    <<: *sell_dmz_staging_account
+    amd64_ami_tags: *staging_amd64_ami
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: sell-dmz.use1.zdsystest.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    use_record_injector: 'false' # sell-dmz-* records are not migrated across to the APEX zone and cannot use record-injector
+    vpn_cidrs:
+      - "10.220.0.0/18" # https://github.com/zendesk/config-service-data/blob/master/context/network/foundation_vpn.yml#L1
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.211.128.0/18"
+      - "10.164.0.0/17" # allow access from new internal tools cluster.
+    collapse_domain: 'true'
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+    vpc_tags:
+      Name: sell-dmz-staging
+    eniconfig:
+      sg_stack_name: sell-dmz-k8s-app-security-groups
+      sg_logical_name: K8sAppEc2SecurityGroup
+    etcd_az_names:
+      - us-east-1a
+      - us-east-1a
+      - us-east-1c
+      - us-east-1c
+      - us-east-1d
+    nodegroups:
+      <<: *staging_core_nodegroups
+      node:
+        min_size: 1
+        max_size: 40 # large number to allow load testing
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *staging_instance_types_node_small
+      node-arm: *sell_dmz_staging_arm64_nodegroup
+      ingress-node:
+        chef_role: k8s_node
+        min_size: 0
+        max_size: 20
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        additional_ssh_teams: [ edge ]
+        arm64_instance_types: *sell_dmz_instance_types_ingress_node
+        root_ebs_size: "100"
+        consul:
+          use_cache: false
+        type: ingress
+        taints:
+          - compute.zende.sk/nodegroup=ingress:NoExecute
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          api_url: https://k8s-api.sell-dmz.use1.zdsystest.com
+          service_cidr: 172.19.16.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: sell-dmz-staging
+        etcd:
+          <<: *4gb_etcd_values
+          dns_zone: k8s-etcd.sell-dmz.use1.zdsystest.com
+          state: existing
+        etcd-events:
+          dns_zone: k8s-etcd-events.sell-dmz.use1.zdsystest.com
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        kube_proxy:
+          method: 'daemonset'
+        feature_gates: *feature_gates
+      zendesk_vault:
+        vault_endpoint: https://secret-sell-dmz.staging-zende.sk:8200
+    additional_security_groups: {}
+
+  - name: sell-dmz-production
+    partition: sell-dmz-production
+    <<: *production_values
+    <<: *sell_dmz_production_account
+    amd64_ami_tags: *production_amd64_ami
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: sell-dmz.use1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    use_record_injector: 'false' # sell-dmz-* records are not migrated across to the APEX zone and cannot use record-injector
+    collapse_domain: 'true'
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+    vpc_tags:
+      Name: sell-dmz-production
+    eniconfig:
+      sg_stack_name: sell-dmz-k8s-app-security-groups
+      sg_logical_name: K8sAppEc2SecurityGroup
+    etcd_az_names:
+      - us-east-1a
+      - us-east-1a
+      - us-east-1c
+      - us-east-1c
+      - us-east-1d
+    nodegroups:
+      <<: *production_core_nodegroups
+      node:
+        min_size: 8
+        max_size: 60
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *production_instance_types_node
+      node-arm: *production_m8g_arm64_nodegroup
+      ingress-node:
+        chef_role: k8s_node
+        min_size: 0
+        max_size: 20
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        additional_ssh_teams: [ edge ]
+        arm64_instance_types: *sell_dmz_instance_types_ingress_node
+        root_ebs_size: "100"
+        consul:
+          use_cache: false
+        type: ingress
+        taints:
+          - compute.zende.sk/nodegroup=ingress:NoExecute
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          api_url: https://k8s-api.sell-dmz.use1.zdsys.com
+          service_cidr: 10.236.60.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: sell-dmz-production
+        etcd:
+          <<: *4gb_etcd_values
+          dns_zone: k8s-etcd.sell-dmz.use1.zdsys.com
+          state: existing
+        etcd-events:
+          dns_zone: k8s-etcd-events.sell-dmz.use1.zdsys.com
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+      zendesk_vault:
+        vault_endpoint: https://secret-sell-dmz.zende.sk:8200
+    additional_security_groups: {}
+
+  #
+  # Scooter clusters
+  #
+  - name: scooter-staging-usw2
+    <<: *staging_values
+    <<: *scooter_account
+    <<: *staging_eks_values
+    partition: scooter-staging-usw2
+    env: staging
+    vpc_id: vpc-0c91657f7bb27e8a4
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups:
+      <<: *scooter_eks_base_nodegroups
+    eniconfig:
+      sg_stack_name: scooter-staging-usw2-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ scooter-staging-usw2-security-groups, AllowConsul ] ]
+      node: [ [ scooter-staging-usw2-security-groups, App ] ]
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    provider: eks
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/376BA6329BAFDD853C1622225CA5B1FC
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      kubernetes.io/cluster/scooter-staging-usw2: shared
+    default_attributes:
+      zendesk_kubernetes:
+        kube_proxy:
+          method: 'daemonset'
+
+  - name: scooter-ci-usw2-1
+    <<: *staging_values
+    <<: *scooter_account
+    <<: *staging_eks_values
+    # override for sandbox_values
+    partition: scooter-ci-usw2-1
+    env: staging
+    vpc_id: vpc-0887387f7804f1330
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups:
+      <<: *scooter_eks_base_nodegroups
+      control-plane:
+        <<: *api_nodegroup
+        arm64_instance_types:
+          - r7g.xlarge
+          - r6g.xlarge
+      node:
+        <<: *scooter_eks_node_nodegroup
+        root_ebs_size: "300" # increase root volume size for CI nodes as nodes are binpacked with many pods
+      node-arm:
+        <<: *scooter_eks_arm64_nodegroup
+        root_ebs_size: "300" # increase root volume size for CI nodes as nodes are binpacked with many pods
+    eniconfig:
+      sg_stack_name: scooter-ci-usw2-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ scooter-ci-usw2-1-security-groups, AllowConsul ] ]
+      node: [ [ scooter-ci-usw2-1-security-groups, App ] ]
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    provider: eks
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/C1205A0457C4BEAFF6FFE2E3883A4B41
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      kubernetes.io/cluster/scooter-ci-usw2-1: shared
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2
+      join_cluster: [consul.usw2.zdsystest.com]
+
+  - name: scooter-apse2
+    <<: *staging_values
+    <<: *scooter_account
+    <<: *staging_eks_values
+    partition: scooter-apse2
+    env: staging
+    vpc_id: vpc-023b114dbdbe87463
+    use_record_injector: 'false'
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups:
+      <<: *scooter_eks_base_nodegroups
+    eniconfig:
+      sg_stack_name: scooter-apse2-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ scooter-apse2-security-groups, AllowConsul ] ]
+      node: [ [ scooter-apse2-security-groups, App ] ]
+    immutable_eni: true
+    region: ap-southeast-2
+    dns_zone: apse2.zdsystest.com
+    provider: eks
+    azs:
+      - ap-southeast-2a
+      - ap-southeast-2b
+      - ap-southeast-2c
+    oidc_provider: https://oidc.eks.ap-southeast-2.amazonaws.com/id/CA76B7D980158BA1375079C10C51EB24
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      kubernetes.io/cluster/scooter-apse2: shared
+
+  - name: scooter-usw2-1
+    <<: *staging_values
+    <<: *scooter_account
+    <<: *staging_eks_values
+    partition: scooter-usw2-1
+    env: staging
+    vpc_id: vpc-028c91ded39b83f45
+    vpc_tags: null # override default value to force use of vpc_id
+    nodegroups:
+      <<: *scooter_eks_base_nodegroups
+      control-plane:
+        <<: *api_nodegroup
+        arm64_instance_types:
+          - r7g.xlarge
+          - r6g.xlarge
+    eniconfig:
+      sg_stack_name: scooter-usw2-1-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+    additional_security_groups:
+      default: [ [ scooter-usw2-1-security-groups, AllowConsul ] ]
+      node: [ [ scooter-usw2-1-security-groups, App ] ]
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    provider: eks
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/1582C4615B7BAC63A8B4DED86C2F5364
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      kubernetes.io/cluster/scooter-usw2-1: shared
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2
+      join_cluster: [consul.usw2.zdsystest.com]
+
+  #
+  # Internaltools clusters
+  #
+  - name: internaltools-staging-use1
+    partition: internaltools-staging-use1
+    <<: *staging_values
+    <<: *staging_account
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: infra.use1.zdsystest.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      aws:cloudformation:stack-name: infra-networks
+    vpc_tags:
+      Name: use1-infra-staging
+    eniconfig:
+      sg_stack_name: infra-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+      s3nat_pod_subnet_tag: K8S-CNI-S3nat-Pods-Subnet
+    etcd_az_names:
+      - us-east-1a
+      - us-east-1a
+      - us-east-1c
+      - us-east-1c
+      - us-east-1d
+    slack_channels: [ jenkins-ops ]
+    additional_security_groups:
+      default: [ [ infra-security-groups, AllowConsul ] ]
+      node: [ [ infra-security-groups, App ] ]
+    nodegroups:
+      <<: *staging_core_nodegroups
+      node:
+        min_size: 2
+        max_size: 15
+        drain_timeout: 1h
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *staging_internaltools_instance_types_node
+        root_ebs_size: "200"
+        root_ebs_throughput: "150" # MiB/s - jenkins-on-kubernetes runs on x86_64 nodes and was exceeding 125 MiB/s throughput
+      node-arm:
+        <<: *staging_m8g_arm64_nodegroup_internaltools
+        root_ebs_iops: "3500" # slight increase to avoid throttling
+        root_ebs_throughput: "200" # MiB/s - jenkins was exceeding the 125 MiB/s throughput limit
+      node-spot: *node_spot_nodegroup
+      node-ga-runner:
+        min_size: 0
+        max_size: 100
+        drain_timeout: 1h
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *instance_types_node_ga_runner
+        root_ebs_size: "100"
+        chef_role: k8s_node
+        consul:
+          use_cache: false
+        additional_ssh_teams: [ ci-platform ]
+        extra_labels:
+          ownedby: ci-platform
+        taints:
+          - ownedby=ci-platform:NoExecute
+      s3nat-node:
+        <<: *s3nat_nodegroup
+        arm64_instance_types: *internaltools_instance_types_s3nat_node
+        min_size: 0
+    consul_config:
+      <<: *staging_consul
+      datacenter: use1-infra
+      join_cluster: [ consul.infra.use1.zdsystest.com ]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          service_cidr: 172.29.24.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: internaltools-staging-use1
+        etcd:
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        kube_proxy:
+          method: 'daemonset'
+        feature_gates: *feature_gates
+
+  - name: internaltools-production-use1
+    partition: internaltools-production-use1
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: infra.use1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+      aws:cloudformation:stack-name: infra-networks
+    vpc_tags:
+      Name: use1-infra
+    eniconfig:
+      sg_stack_name: infra-security-groups
+      sg_logical_name: AppEc2SecurityGroup
+      zorg_pod_subnet_tag: K8S-CNI-Zorg-Pods-Subnet
+    etcd_az_names:
+      - us-east-1a
+      - us-east-1a
+      - us-east-1b
+      - us-east-1b
+      - us-east-1c
+    additional_security_groups:
+      default: [ [ infra-security-groups, AllowConsul ] ]
+      node: [ [ infra-security-groups, App ] ]
+    nodegroups:
+      <<: *production_core_nodegroups
+      node-arm:
+        <<: *arm_nodegroup
+        min_size: 1
+      node:
+        min_size: 2
+        max_size: 15
+        root_ebs_throughput: "150" # MiB/s - spinnaker runs on x86_64 nodes and we often see it exceeding 125 MiB/s throughput
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *internaltools_instance_types_node
+    consul_config:
+      <<: *production_consul
+      datacenter: use1-infra
+      join_cluster: [consul.infra.use1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          service_cidr: 10.236.76.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: internaltools-production-use1
+        etcd:
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+
+  #
+  # Staging Podded clusters
+  #
+  - name: scooter-euc1
+    partition: scooter-euc1
+    <<: *staging_values
+    <<: *scooter_values
+    <<: *scooter_account
+    immutable_eni: true
+    region: eu-central-1
+    env: zendesk-scooter
+    slack_channels: [scooter-alerts]
+    dns_zone: scooter-euc1.euc1.zdsystest.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    use_record_injector: 'false' # the scooter account has not been migrated to the apex zone by Edge and cannot use record-injector
+    vpn_cidrs:
+      - "172.16.104.0/21" # pod998 infra private subnets, used by secret service
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      - "10.211.128.0/18" # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.164.0.0/17" # allow access from new internal tools cluster.
+      - "172.16.64.0/18" # vault usw2 vpc cidr
+      - "172.16.192.0/18" # vault use1 vpc cidr (for vault fail-over)
+    ssh_source_network: 10.148.0.0/14
+    etcd_client_network: 10.148.0.0/14
+    api_client_network: 10.148.0.0/14
+    node_source_network: 10.148.0.0/14
+    eniconfig:
+      sg_stack_name: scooter-security-groups-euc1
+      sg_logical_name: AppSecurityGroup
+    subnet_tags:
+      Hostgroup: K8S-Subnet
+    vpc_tags:
+      Name: euc1-scooter
+    etcd_az_names:
+      - eu-central-1a
+      - eu-central-1a
+      - eu-central-1b
+      - eu-central-1b
+      - eu-central-1c
+    extra_labels:
+      splunk_environment: staging
+    default_attributes:
+      zendesk_kubernetes:
+        api_server:
+          api_url: https://k8s-api.scooter-euc1.euc1.zdsystest.com
+          service_cidr: 10.234.0.0/16
+          extra_flags:
+            service-account-extend-token-expiration: false
+            runtime-config: *runtime_config
+          cpu_request: 2
+          mem_limit: 0
+        scheduler:
+          mem_limit: 0
+        controller_manager:
+          mem_limit: 0
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        cluster: scooter-euc1
+        etcd:
+          <<: *8gb_etcd_values
+          dns_zone: k8s-etcd.scooter-euc1.euc1.zdsystest.com
+          state: existing
+        etcd-events:
+          dns_zone: k8s-etcd-events.scooter-euc1.euc1.zdsystest.com
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        kubelet: *scooter_kubelet_flags
+        feature_gates: *feature_gates_scooter
+    additional_security_groups: {}
+    nodegroups:
+      <<: *staging_core_nodegroups
+      api:
+        <<: *scooter_api_nodegroup
+      etcd-member:
+        <<: *staging_etcd_nodegroup
+        arm64_instance_types: *8gb_etcd_instance_types
+      etcd-events-member:
+        <<: *etcd_events_nodegroup
+        arm64_instance_types: *staging_instance_types_etcd_events
+        root_ebs_size: "100"
+      node:
+        min_size: 1
+        max_size: 150
+        drain_timeout: 1h
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *scooter_instance_types_node
+        root_ebs_size: "200"
+        root_ebs_iops: "4750"
+        root_ebs_throughput: "125" # MiB/s
+      node-ssd:
+        chef_role: k8s_node
+        min_size: 0
+        max_size: 70
+        scale_down_grace_period: 30s # prompt scale down after draining completed
+        amd64_instance_types: *scooter_instance_types_node_ssd
+        root_volume_type: gp3
+        root_ebs_size: "40"
+        root_ebs_iops: "4750"
+        root_ebs_throughput: "125" # MiB/s
+        taints: *node_ssd_taints
+      node-arm:
+        <<: *scooter_arm64_nodegroup
+
+  - name: pod998
+    partition: pod998
+    <<: *staging_values
+    <<: *staging_account
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    api_internal_lb_certificate_arn: arn:aws:acm:us-west-2:589470546847:certificate/c2d26804-8733-4b4e-a852-3270ac71d15d
+    vpc_tags:
+      Name: us-west-2
+    eniconfig: *podded_eni_config
+    vpn_cidrs:
+      - "10.220.0.0/18" # https://github.com/zendesk/config-service-data/blob/master/context/network/foundation_vpn.yml#L1
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.211.128.0/18"
+      - "10.164.0.0/17" # allow access from new internal tools cluster.
+    etcd_az_names:
+      - us-west-2a
+      - us-west-2a
+      - us-west-2b
+      - us-west-2b
+      - us-west-2c
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2-staging-pod998
+      join_cluster: [consul.usw2.zdsystest.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod998.zdsystest.com
+        api_server:
+          service_cidr: 172.29.8.0/22
+          cpu_request: 2
+          extra_flags:
+            goaway-chance: "0.001"
+            runtime-config: *runtime_config
+        cluster: pod998
+        etcd:
+          state: existing
+          <<: *4gb_etcd_values
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+        kubelet:
+          enable_containerd_image_registry: true
+        kube_proxy:
+          method: 'daemonset'
+    nodegroups:
+      <<: *staging_nodegroups
+      node-arm:
+        <<: *staging_m8g_arm64_nodegroup
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_staging
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot_staging
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        skip_azs: [us-west-2b] # g6 instances are not available in us-west-2b
+      node-nvidia-gpu-large:
+        <<: *nvidia_gpu_nodegroup_staging_large
+      node-spot: *node_spot_nodegroup_karpenter
+
+  - name: pod998-eks
+    partition: pod998
+    <<: *staging_values
+    <<: *staging_account
+    <<: *staging_eks_values
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsystest.com
+    use_nlb: 'true'
+    provider: eks
+    oidc_provider: https://oidc.eks.us-west-2.amazonaws.com/id/992E3F5ED8DE0E8CAC230E7F62965108
+    vpc_tags:
+      Name: us-west-2
+    eniconfig: *podded_eni_config
+    vpn_cidrs:
+      - "10.220.0.0/18" # https://github.com/zendesk/config-service-data/blob/master/context/network/foundation_vpn.yml#L1
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.211.128.0/18"
+      - "10.164.0.0/17" # allow access from new internal tools cluster.
+    azs:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2c
+    consul_config:
+      <<: *staging_consul
+      datacenter: usw2-staging-pod998
+      join_cluster: [consul.usw2.zdsystest.com]
+    default_attributes:
+      zendesk_kubernetes:
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+    nodegroups:
+      <<: *eks_staging_nodegroups
+      node:
+        <<: *staging_eks_node_nodegroup
+        max_size: 10
+        amd64_instance_types: *staging_spot_instance_types_node
+        # run pod998-eks for now on spot similar to sandbox
+        # remove before we officially migrate to *-eks
+        spot_config: *spot_config
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_staging
+        max_size: 4
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot_staging
+        max_size: 4
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        max_size: 4
+        skip_azs: [us-west-2b] # g6 instances are not available in us-west-2b
+      node-arm:
+        <<: *eks_arm64_nodegroup
+        arm64_instance_types: *staging_instance_types_small_arm64_node
+      node-spot: *node_spot_nodegroup_karpenter
+
+  - name: pod999
+    partition: pod999
+    <<: *staging_values
+    <<: *staging_account
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: use1.zdsystest.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    vpn_cidrs:
+      - "10.220.0.0/18" # https://github.com/zendesk/config-service-data/blob/master/context/network/foundation_vpn.yml#L1
+      - "10.61.0.0/16" # https://github.com/zendesk/config-service-data/blob/master/context/network/global_protect_vpn.yml#L1
+      # allow access from use1-infra, includes Samson, Spinnaker, Internal Tools, etc.
+      - "10.211.128.0/18"
+    vpc_tags:
+      Name: use1
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: use1-security-groups
+    etcd_az_names:
+      - us-east-1a
+      - us-east-1a
+      - us-east-1c
+      - us-east-1c
+      - us-east-1d
+    consul_config:
+      <<: *staging_consul
+      datacenter: use1-staging-pod999
+      join_cluster: [consul.use1.zdsystest.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod999.zdsystest.com
+        api_server:
+          service_cidr: 172.29.12.0/22
+          cpu_request: 2
+          extra_flags:
+            goaway-chance: "0.001"
+            runtime-config: *runtime_config
+        cluster: pod999
+        etcd:
+          state: existing
+          <<: *4gb_etcd_values
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        kube_proxy:
+          method: 'daemonset'
+        feature_gates: *feature_gates
+    additional_security_groups:
+      default: [ [ use1-security-groups, AllowConsul ] ]
+      node: [ [ use1-security-groups, App ] ]
+    nodegroups:
+      <<: *staging_nodegroups
+      node-arm:
+        <<: *staging_m8g_arm64_nodegroup
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_staging
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot_staging
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+      node-nvidia-gpu-large:
+        <<: *nvidia_gpu_nodegroup_staging_large
+
+  #
+  # Production Podded Clusters
+  #
+  - name: pod13
+    partition: pod13
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-west-2a
+      - us-west-2a
+      - us-west-2b
+      - us-west-2b
+      - us-west-2c
+    vpc_tags:
+      Name: usw2
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: usw2-security-groups
+    consul_config:
+      <<: *production_consul
+      datacenter: usw2
+      join_cluster: [consul.usw2.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod13.zdsys.com
+        api_server:
+          service_cidr: 10.236.4.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod13
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 400 # TODO: reduce once pwd is fixed https://zendesk.slack.com/archives/C4PF92EKD/p1660063919541899
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    additional_security_groups:
+      default: [ [ usw2-security-groups, AllowConsul ] ]
+      node: [ [ usw2-security-groups, App ] ]
+    nodegroups:
+      <<: *production_nodegroups
+      s3nat-node:
+        <<: *s3nat_nodegroup
+        arm64_instance_types: *pod13_instance_types_s3nat_node
+        # cloudflare-observability runs in POD13 only
+        # and its fluentd container is disk I/O bound
+        # which exhausts other pods such as classic/mail-ticket-creator
+        root_ebs_iops: 6000
+        root_ebs_throughput: 250
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        skip_azs: [us-west-2b] # no g6 available
+
+  - name: pod15
+    partition: pod15
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: ap-southeast-2
+    dns_zone: apse2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - ap-southeast-2a
+      - ap-southeast-2a
+      - ap-southeast-2b
+      - ap-southeast-2b
+      - ap-southeast-2c
+    vpc_tags:
+      Name: ap-southeast-2
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: apse2
+      join_cluster: [consul.apse2.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod15.zdsys.com
+        api_server:
+          service_cidr: 10.236.12.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod15
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              container_log_max_size: "500Mi" # Throughput is very low - decrease log size
+              container_log_max_files: 20     # increase the number of log files to keep the total log size up
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6e
+        skip_azs: [ap-southeast-2b] # no g5/g6 available
+
+  - name: pod17
+    partition: pod17
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: eu-west-1
+    dns_zone: euw1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - eu-west-1a
+      - eu-west-1a
+      - eu-west-1b
+      - eu-west-1b
+      - eu-west-1c
+    vpc_tags:
+      Name: eu-west-1
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: euw1
+      join_cluster: [consul.euw1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod17.zdsys.com
+        api_server:
+          service_cidr: 10.236.20.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod17
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        root_ebs_size: 400
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6
+
+  - name: pod18
+    partition: pod18
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: eu-central-1
+    dns_zone: euc1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - eu-central-1a
+      - eu-central-1a
+      - eu-central-1b
+      - eu-central-1b
+      - eu-central-1c
+    vpc_tags:
+      Name: eu-central-1
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: euc1
+      join_cluster: [consul.euc1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod18.zdsys.com
+        api_server:
+          service_cidr: 10.236.24.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod18
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        root_ebs_size: 400
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+              container_log_max_size: "750Mi"
+              container_log_max_files: 15
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6e
+        skip_azs: [eu-central-1c] # no g6 available
+
+  - name: pod19
+    partition: pod19
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: pod19.use1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "pod19-outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-east-1b
+      - us-east-1b
+      - us-east-1c
+      - us-east-1c
+      - us-east-1d
+    vpc_tags:
+      Name: us-east-1
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: use1
+      join_cluster: [consul.use1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod19.zdsys.com
+        api_server:
+          service_cidr: 10.236.28.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod19
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+
+  - name: pod20
+    partition: pod20
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-west-2
+    dns_zone: usw2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "pod20-outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-west-2a
+      - us-west-2a
+      - us-west-2b
+      - us-west-2b
+      - us-west-2c
+    vpc_tags:
+      Name: usw2
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: usw2-security-groups
+    consul_config:
+      <<: *production_consul
+      datacenter: usw2
+      join_cluster: [consul.usw2.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod20.zdsys.com
+        api_server:
+          service_cidr: 10.236.32.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod20
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    additional_security_groups:
+      default: [ [ usw2-security-groups, AllowConsul ] ]
+      node: [ [ usw2-security-groups, App ] ]
+    nodegroups:
+      <<: *production_nodegroups
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        skip_azs: [us-west-2b] # no g6 available
+
+  - name: pod23
+    partition: pod23
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-east-1
+    dns_zone: pod23.use1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "pod23-outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-east-1d
+      - us-east-1d
+      - us-east-1b
+      - us-east-1b
+      - us-east-1c
+    vpc_tags:
+      Name: us-east-1
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: use1
+      join_cluster: [consul.use1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod23.zdsys.com
+        api_server:
+          service_cidr: 10.236.44.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod23
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        amd64_instance_types: *production_instance_types_zorg_node_xl
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              container_log_max_size: "2Gi" # Throughput is very high on this pod, increase log size
+              container_log_max_files: 5    # reduce the number of log files to keep the total log size down
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+
+  - name: pod25
+    partition: pod25
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: ap-northeast-1
+    dns_zone: apne1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - ap-northeast-1d
+      - ap-northeast-1d
+      - ap-northeast-1c
+      - ap-northeast-1c
+      - ap-northeast-1a
+    vpc_tags:
+      Name: ap-northeast-1
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: pod25
+      join_cluster: [consul.pod25.apne1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod25.zdsys.com
+        api_server:
+          service_cidr: 10.236.0.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod25
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        skip_azs: [ap-northeast-1d] # no g5/g6 available
+      s3nat-node:
+        <<: *s3nat_nodegroup
+        root_ebs_throughput: 150 # MiB/s as vector is disk I/O bound
+
+  - name: pod26
+    partition: pod26
+    <<: *canary_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-east-2
+    dns_zone: use2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "pod26-outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-east-2a
+      - us-east-2a
+      - us-east-2b
+      - us-east-2b
+      - us-east-2c
+    vpc_tags:
+      Name: us-east-2
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: pod26
+      join_cluster: [consul.pod26.use2.zdsys.com]
+    nodegroups:
+      <<: *production_nodegroups
+      node:
+        <<: *node_nodegroup
+        min_size: 2 # pod26 is our smallest production cluster, allow it to scale down further
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+        min_size: 3 # pod26 is our smallest production cluster, allow it to scale down further
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              container_log_max_size: "250Mi" # Throughput is very low - decrease log size
+              container_log_max_files: 20
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod26.zdsys.com
+        api_server:
+          service_cidr: 10.236.52.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod26
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+
+  - name: pod27
+    partition: pod27
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: us-east-2
+    dns_zone: use2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'true'
+    api_internal_lb_certificate_arn:
+      stack_output:
+        - "pod27-outputs"
+        - "StarzdsyscomCertArn"
+    etcd_az_names:
+      - us-east-2a
+      - us-east-2a
+      - us-east-2b
+      - us-east-2c
+      - us-east-2c
+    vpc_tags:
+      Name: us-east-2
+    eniconfig: *podded_eni_config
+    consul_config:
+      <<: *production_consul
+      datacenter: pod27
+      join_cluster: [consul.pod27.use2.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod27.zdsys.com
+        api_server:
+          service_cidr: 10.236.56.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod27
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+              container_log_max_size: "500Mi"
+              container_log_max_files: 20
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+
+  - name: pod28
+    partition: pod28
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: eu-central-1
+    dns_zone: euc1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    etcd_az_names:
+      - eu-central-1a
+      - eu-central-1a
+      - eu-central-1b
+      - eu-central-1b
+      - eu-central-1c
+    vpc_tags:
+      Name: eu-central-1-pod28
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: pod28-security-groups
+    consul_config:
+      <<: *production_consul
+      datacenter: pod28
+      join_cluster: [consul.pod28.euc1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          service_cidr: 10.236.68.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod28
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    additional_security_groups:
+      default: [ [ pod28-security-groups, AllowConsul ] ]
+      node: [ [ pod28-security-groups, App ] ]
+    nodegroups:
+      <<: *production_nodegroups
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+              container_log_max_size: "500Mi"
+              container_log_max_files: 20
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6
+        skip_azs: [eu-central-1c] # no g6 available
+
+  - name: pod29
+    partition: pod29
+    <<: *production_values
+    <<: *production_account
+    immutable_eni: true
+    region: eu-west-1
+    dns_zone: euw1.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    etcd_az_names:
+      - eu-west-1a
+      - eu-west-1a
+      - eu-west-1b
+      - eu-west-1c
+      - eu-west-1c
+    vpc_tags:
+      Name: eu-west-1-pod29
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: pod29-security-groups
+    consul_config:
+      <<: *production_consul
+      datacenter: pod29
+      join_cluster: [consul.pod29.euw1.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        api_server:
+          service_cidr: 10.236.72.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod29
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: false
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    additional_security_groups:
+      default: [ [ pod29-security-groups, AllowConsul ] ]
+      node: [ [ pod29-security-groups, App ] ]
+    nodegroups:
+      <<: *production_nodegroups
+      node-arm:
+        <<: *production_m8g_arm64_nodegroup
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6
+
+  - name: pod30
+    partition: pod30
+    <<: *production_values
+    aws_profile: zendesk-production-pod30
+    account_id: 891377236002
+    immutable_eni: true
+    region: ap-northeast-3
+    dns_zone: apne3.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    etcd_az_names:
+      - ap-northeast-3a
+      - ap-northeast-3a
+      - ap-northeast-3b
+      - ap-northeast-3b
+      - ap-northeast-3c
+    vpc_tags:
+      Name: pod30-vpc
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+    eniconfig:
+      <<: *podded_eni_config
+      sg_stack_name: pod30-security-groups
+    additional_security_groups:
+      default: [ [ pod30-security-groups, AllowConsul ] ]
+      node: [ [ pod30-security-groups, App ] ]
+    consul_config:
+      <<: *production_consul
+      datacenter: pod30
+      join_cluster: [consul.pod30.apne3.zdsys.com]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod30.zdsys.com
+        api_server:
+          service_cidr: 10.72.64.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod30
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      api:
+        <<: *api_nodegroup
+        # pod30 is based in ap-northeast-3 which doesnt have access to m7gs
+        arm64_instance_types:
+          - m6g.4xlarge
+          - r6g.4xlarge
+          - m6g.8xlarge
+      etcd-member:
+        <<: *etcd_nodegroup
+        arm64_instance_types: *pod30_instance_types_etcd_arm64
+      etcd-events-member:
+        <<: *etcd_events_nodegroup
+        arm64_instance_types: *pod30_instance_types_etcd_arm64
+      node-arm:
+        <<: *pod30_arm64_nodegroup
+      s3nat-node:
+        <<: *s3nat_nodegroup
+        arm64_instance_types: *pod30_instance_types_s3nat_node
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+              container_log_max_size: "100Mi"
+              container_log_max_files: 20
+      node-nvidia-gpu:
+        <<: *nvidia_gpu_nodegroup_production
+        skip_azs: # skipping the GPU nodegroup manifest and pipeline generation in ap-northeast-3a since g4dn instance type is not available in AWS in the given AZ
+          - ap-northeast-3a
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no56
+        skip_azs: # skipping the GPU nodegroup manifest and pipeline generation in ap-northeast-3a since g4dn instance type is not available in AWS in the given AZ
+          - ap-northeast-3a
+      node-nvidia-gpu-spot:
+        <<: *nvidia_gpu_nodegroup_spot
+        skip_azs: # skipping the GPU nodegroup manifest and pipeline generation in ap-northeast-3a since g4dn instance type is not available in AWS in the given AZ
+          - ap-northeast-3a
+  - name: pod31
+    partition: pod31
+    <<: *production_values
+    aws_profile: production-pod31
+    account_id: 975049948171
+    immutable_eni: true
+    region: eu-west-2
+    dns_zone: euw2.zdsys.com
+    use_nlb: 'true'
+    create_legacy_lb: 'false'
+    etcd_az_names:
+      - eu-west-2a
+      - eu-west-2a
+      - eu-west-2b
+      - eu-west-2b
+      - eu-west-2c
+    vpc_tags:
+      Name: pod31-vpc
+    subnet_tags:
+      Hostgroup: K8S-Nodes-Subnet
+    eniconfig:
+     <<: *podded_eni_config
+     sg_stack_name: pod31-security-groups
+    additional_security_groups:
+      default: [ [ pod31-security-groups, AllowConsul ] ]
+      node: [ [ pod31-security-groups, App ] ]
+    consul_config:
+      <<: *production_consul
+      datacenter: pod31
+      join_cluster: [ consul.pod31.euw2.zdsys.com ]
+    default_attributes:
+      zendesk_kubernetes:
+        controller_manager:
+          extra_flags:
+            enable-leader-migration: 'true' # TEMPORARY (for migration to cloud-controller-manager https://kubernetes.io/docs/tasks/administer-cluster/controller-manager-leader-migration/#background)
+        additional_server_certs:
+          - kubernetes-api-internal-pod31.zdsys.com
+        api_server:
+          service_cidr: 10.72.68.0/22
+          extra_flags:
+            runtime-config: *runtime_config
+        cluster: pod31
+        etcd:
+          <<: *podded_prod_cluster_etcd_values
+          state: existing
+        etcd-events:
+          state: existing
+        networking:
+          use_ip_prefix: true
+        coredns:
+          forward_rate_limit: 100
+          throttle_above_forward_rate_limit: true
+        feature_gates: *feature_gates
+    nodegroups:
+      <<: *production_nodegroups
+      node-arm:
+        <<: *arm_nodegroup
+        min_size: 3
+      zorg-node:
+        <<: *zorg_nodegroup
+        default_attributes:
+          zendesk_kubernetes:
+            kubelet:
+              # See Access Logs RFC: https://docs.google.com/document/d/1Qos9LToDUrwbqidVAipjkP9rSZfvvABSNPWANHioeOA
+              container_log_max_size: "100Mi"
+              container_log_max_files: 20
+      node-nvidia-gpu-batch:
+        <<: *nvidia_gpu_batch_nodegroup
+        amd64_instance_types: *nvidia_gpu_batch_instance_types_no6
+        skip_azs: [eu-west-2c] # no g5 available
