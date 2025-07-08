@@ -4,61 +4,76 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// --- Data Structures (similar to original main.go) ---
+// --- Data Structures ---
 
 // AMITag represents a single AMI tag.
 type AMITag struct {
 	Revision    string `yaml:"Revision,omitempty"`
 	Environment string `yaml:"Environment,omitempty"`
-	Hostgroup   string `yaml:"Hostgroup,omitempty"`
-	Platform    string `yaml:"Platform,omitempty"`
 	BaseName    string `yaml:"BaseName,omitempty"`
 }
 
-// Tags mirrors the 'tags' section of the YAML.
-type Tags struct {
-	AmiRevisionMain   *AMITag `yaml:"ami_revision_main"`
-	AmiRevisionBranch *AMITag `yaml:"ami_revision_branch"`
-	Envs              struct {
-		ProductionAmiEnv *AMITag `yaml:"production_ami_env"`
-		StagingAmiEnv    *AMITag `yaml:"staging_ami_env"`
-	} `yaml:"envs"`
-	Providers struct {
-		Chef *AMITag `yaml:"chef"`
-		Eks  *AMITag `yaml:"eks"`
-	} `yaml:"providers"`
-	Platforms struct {
-		Ubuntu2204 struct {
-			Arm64 *AMITag `yaml:"arm64"`
-			Amd64 *AMITag `yaml:"amd64"`
-		} `yaml:"ubuntu_22_04"`
-	} `yaml:"platforms"`
-	BaseNames struct {
-		EksArm64 *AMITag `yaml:"eks_arm64"`
-		EksAmd64 *AMITag `yaml:"eks_amd64"`
-		SfnAmd64 *AMITag `yaml:"sfn_amd64"`
-		SfnArm64 *AMITag `yaml:"sfn_arm64"`
-	} `yaml:"base_names"`
+// Nodegroup represents a nodegroup configuration.
+type Nodegroup struct {
+	Autoscale      *bool    `yaml:"autoscale,omitempty"`
+	Type           string   `yaml:"type,omitempty"`
+	RootEbsSize    string   `yaml:"root_ebs_size,omitempty"`
+	MaxSize        *int     `yaml:"max_size,omitempty"`
+	ScaleDownGrace string   `yaml:"scale_down_grace_period,omitempty"`
+	DrainTimeout   string   `yaml:"drain_timeout,omitempty"`
+	InstanceTypes  []string `yaml:"amd64_instance_types,omitempty"`
 }
 
-// Vars mirrors the 'vars' section of the YAML.
-type Vars struct {
-	SandboxAmd64Ami    *AMITag `yaml:"sandbox_amd64_ami"`
-	SandboxArm64Ami    *AMITag `yaml:"sandbox_arm64_ami"`
-	SandboxEksAmd64Ami *AMITag `yaml:"sandbox_eks_amd64_ami"`
+// Nodegroups represents the set of nodegroups in a cluster.
+type Nodegroups struct {
+	EtcdMember       *Nodegroup `yaml:"etcd-member,omitempty"`
+	EtcdEventsMember *Nodegroup `yaml:"etcd-events-member,omitempty"`
+	Api              *Nodegroup `yaml:"api,omitempty"`
+	Node             *Nodegroup `yaml:"node,omitempty"`
+}
+
+// DefaultAttributes represents the zendesk_kubernetes default attributes.
+type DefaultAttributes struct {
+	Cluster string `yaml:"cluster,omitempty"`
 }
 
 // Cluster represents a single cluster definition.
 type Cluster struct {
-	Name      string `yaml:"name"`
-	Partition string `yaml:"partition,omitempty"`
-	// Other cluster properties will go here
+	Name                     string                `yaml:"name"`
+	Partition                string                `yaml:"partition,omitempty"`
+	Env                      string                `yaml:"env,omitempty"`
+	Region                   string                `yaml:"region,omitempty"`
+	Amd64AmiTags             *AMITag               `yaml:"amd64_ami_tags,omitempty"`
+	Arm64AmiTags             *AMITag               `yaml:"arm64_ami_tags,omitempty"`
+	CookbookURL              string                `yaml:"cookbook_url,omitempty"`
+	NodeRolloutBatchSize     string                `yaml:"node_rollout_batch_size,omitempty"`
+	SlackChannels            []string              `yaml:"slack_channels,omitempty"`
+	AdditionalSshTeams       []string              `yaml:"additional_ssh_teams,omitempty"`
+	Nodegroups               *Nodegroups           `yaml:"nodegroups,omitempty"`
+	DefaultAttributes        *DefaultAttributes    `yaml:"default_attributes,omitempty"`
+	AwsProfile               string                `yaml:"aws_profile,omitempty"`
+	AccountID                string                `yaml:"account_id,omitempty"`
+	ImmutableEni             bool                  `yaml:"immutable_eni,omitempty"`
+	DnsZone                  string                `yaml:"dns_zone,omitempty"`
+	UseNlb                   string                `yaml:"use_nlb,omitempty"`
+	CreateLegacyLb           string                `yaml:"create_legacy_lb,omitempty"`
+	ApiInternalLbCertArn     string                `yaml:"api_internal_lb_certificate_arn,omitempty"`
+	VpnCidrs                 []string              `yaml:"vpn_cidrs,omitempty"`
+	EtcdAzNames              []string              `yaml:"etcd_az_names,omitempty"`
+	SshSourceNetwork         string                `yaml:"ssh_source_network,omitempty"`
+	EtcdClientNetwork        string                `yaml:"etcd_client_network,omitempty"`
+	ApiClientNetwork         string                `yaml:"api_client_network,omitempty"`
+	NodeSourceNetwork        string                `yaml:"node_source_network,omitempty"`
+	Kube2iamDisabled         []string              `yaml:"kube2iam_disabled,omitempty"`
+	UseRecordInjector        string                `yaml:"use_record_injector,omitempty"`
+	DrainTimeout             int                   `yaml:"drain_timeout,omitempty"`
+	SubnetTags               map[string]string     `yaml:"subnet_tags,omitempty"`
+	AdditionalSecurityGroups map[string][][]string `yaml:"additional_security_groups,omitempty"`
+	VpcTags                  map[string]string     `yaml:"vpc_tags,omitempty"`
 }
 
 // ClusterMetadata is the top-level struct.
 type ClusterMetadata struct {
-	Tags     *Tags      `yaml:"tags"`
-	Vars     *Vars      `yaml:"vars"`
 	Clusters []*Cluster `yaml:"clusters"`
 }
 
@@ -66,14 +81,17 @@ type ClusterMetadata struct {
 
 var (
 	// Definition holds the top-level definition as it's being built.
-	Definition = &ClusterMetadata{
-		Tags: &Tags{},
-		Vars: &Vars{},
-	}
-	// currentTag holds the context for the current AMITag being defined.
-	currentTag *AMITag
+	Definition = &ClusterMetadata{}
 	// currentCluster holds the context for the current Cluster being defined.
 	currentCluster *Cluster
+	// currentAmiTag holds the context for the current AMITag being defined.
+	currentAmiTag *AMITag
+	// currentNodegroups holds the context for the current Nodegroups being defined.
+	currentNodegroups *Nodegroups
+	// currentNodegroup holds the context for the current Nodegroup being defined.
+	currentNodegroup *Nodegroup
+	// currentDefaultAttributes holds the context for the current DefaultAttributes being defined.
+	currentDefaultAttributes *DefaultAttributes
 )
 
 // Run executes the DSL definition and returns the resulting object.
@@ -83,129 +101,6 @@ func Run(dsl func()) *ClusterMetadata {
 }
 
 // --- DSL Functions ---
-
-// TagsDef defines the tags section.
-func TagsDef(dsl func()) {
-	dsl()
-}
-
-// AmiRevisionMain defines the main AMI revision.
-func AmiRevisionMain(revision string) {
-	Definition.Tags.AmiRevisionMain = &AMITag{Revision: revision}
-}
-
-// AmiRevisionBranch defines the branch AMI revision.
-func AmiRevisionBranch(revision string) {
-	Definition.Tags.AmiRevisionBranch = &AMITag{Revision: revision}
-}
-
-// Envs defines the environments.
-func Envs(dsl func()) {
-	dsl()
-}
-
-// ProductionAmiEnv defines the production AMI environment.
-func ProductionAmiEnv(dsl func()) {
-	Definition.Tags.Envs.ProductionAmiEnv = &AMITag{}
-	inTag(Definition.Tags.Envs.ProductionAmiEnv, dsl)
-}
-
-// StagingAmiEnv defines the staging AMI environment.
-func StagingAmiEnv(dsl func()) {
-	Definition.Tags.Envs.StagingAmiEnv = &AMITag{}
-	inTag(Definition.Tags.Envs.StagingAmiEnv, dsl)
-}
-
-// Providers defines the providers.
-func Providers(dsl func()) {
-	dsl()
-}
-
-// Chef defines the Chef provider.
-func Chef(dsl func()) {
-	Definition.Tags.Providers.Chef = &AMITag{}
-	inTag(Definition.Tags.Providers.Chef, dsl)
-}
-
-// Eks defines the EKS provider.
-func Eks(dsl func()) {
-	Definition.Tags.Providers.Eks = &AMITag{}
-	inTag(Definition.Tags.Providers.Eks, dsl)
-}
-
-// Platforms defines the platforms.
-func Platforms(dsl func()) {
-	dsl()
-}
-
-// Ubuntu2204 defines the Ubuntu 22.04 platform.
-func Ubuntu2204(dsl func()) {
-	dsl()
-}
-
-// Arm64 defines the arm64 architecture for the current platform.
-func Arm64(dsl func()) {
-	Definition.Tags.Platforms.Ubuntu2204.Arm64 = &AMITag{}
-	inTag(Definition.Tags.Platforms.Ubuntu2204.Arm64, dsl)
-}
-
-// Amd64 defines the amd64 architecture for the current platform.
-func Amd64(dsl func()) {
-	Definition.Tags.Platforms.Ubuntu2204.Amd64 = &AMITag{}
-	inTag(Definition.Tags.Platforms.Ubuntu2204.Amd64, dsl)
-}
-
-// BaseNames defines the base names.
-func BaseNames(dsl func()) {
-	dsl()
-}
-
-// EksArm64 defines the EKS arm64 base name.
-func EksArm64(dsl func()) {
-	Definition.Tags.BaseNames.EksArm64 = &AMITag{}
-	inTag(Definition.Tags.BaseNames.EksArm64, dsl)
-}
-
-// EksAmd64 defines the EKS amd64 base name.
-func EksAmd64(dsl func()) {
-	Definition.Tags.BaseNames.EksAmd64 = &AMITag{}
-	inTag(Definition.Tags.BaseNames.EksAmd64, dsl)
-}
-
-// SfnAmd64 defines the SFN amd64 base name.
-func SfnAmd64(dsl func()) {
-	Definition.Tags.BaseNames.SfnAmd64 = &AMITag{}
-	inTag(Definition.Tags.BaseNames.SfnAmd64, dsl)
-}
-
-// SfnArm64 defines the SFN arm64 base name.
-func SfnArm64(dsl func()) {
-	Definition.Tags.BaseNames.SfnArm64 = &AMITag{}
-	inTag(Definition.Tags.BaseNames.SfnArm64, dsl)
-}
-
-// VarsDef defines the vars section.
-func VarsDef(dsl func()) {
-	dsl()
-}
-
-// SandboxAmd64Ami defines the sandbox amd64 AMI.
-func SandboxAmd64Ami(dsl func()) {
-	Definition.Vars.SandboxAmd64Ami = &AMITag{}
-	inTag(Definition.Vars.SandboxAmd64Ami, dsl)
-}
-
-// SandboxArm64Ami defines the sandbox arm64 AMI.
-func SandboxArm64Ami(dsl func()) {
-	Definition.Vars.SandboxArm64Ami = &AMITag{}
-	inTag(Definition.Vars.SandboxArm64Ami, dsl)
-}
-
-// SandboxEksAmd64Ami defines the sandbox EKS amd64 AMI.
-func SandboxEksAmd64Ami(dsl func()) {
-	Definition.Vars.SandboxEksAmd64Ami = &AMITag{}
-	inTag(Definition.Vars.SandboxEksAmd64Ami, dsl)
-}
 
 // ClusterDef defines a new cluster.
 func ClusterDef(dsl func()) {
@@ -230,44 +125,186 @@ func Partition(val string) {
 	}
 }
 
-// Environment sets the Environment field on the current AMI tag.
+// Env sets the environment for the current cluster.
+func Env(val string) {
+	if currentCluster != nil {
+		currentCluster.Env = val
+	}
+}
+
+// Region sets the region for the current cluster.
+func Region(val string) {
+	if currentCluster != nil {
+		currentCluster.Region = val
+	}
+}
+
+// Amd64AmiTags defines the amd64 AMI tags for the current cluster.
+func Amd64AmiTags(dsl func()) {
+	if currentCluster != nil {
+		currentCluster.Amd64AmiTags = &AMITag{}
+		inAmiTag(currentCluster.Amd64AmiTags, dsl)
+	}
+}
+
+// Arm64AmiTags defines the arm64 AMI tags for the current cluster.
+func Arm64AmiTags(dsl func()) {
+	if currentCluster != nil {
+		currentCluster.Arm64AmiTags = &AMITag{}
+		inAmiTag(currentCluster.Arm64AmiTags, dsl)
+	}
+}
+
+// Revision sets the revision for the current AMI tag.
+func Revision(val string) {
+	if currentAmiTag != nil {
+		currentAmiTag.Revision = val
+	}
+}
+
+// Environment sets the environment for the current AMI tag.
 func Environment(val string) {
-	if currentTag != nil {
-		currentTag.Environment = val
+	if currentAmiTag != nil {
+		currentAmiTag.Environment = val
 	}
 }
 
-// Hostgroup sets the Hostgroup field on the current AMI tag.
-func Hostgroup(val string) {
-	if currentTag != nil {
-		currentTag.Hostgroup = val
-	}
-}
-
-// Platform sets the Platform field on the current AMI tag.
-func Platform(val string) {
-	if currentTag != nil {
-		currentTag.Platform = val
-	}
-}
-
-// BaseName sets the BaseName field on the current AMI tag.
+// BaseName sets the base name for the current AMI tag.
 func BaseName(val string) {
-	if currentTag != nil {
-		currentTag.BaseName = val
+	if currentAmiTag != nil {
+		currentAmiTag.BaseName = val
 	}
 }
 
-// Merge copies fields from a source tag to the current tag.
-func Merge(source *AMITag) {
-	if currentTag != nil && source != nil {
-		if source.Revision != "" {
-			currentTag.Revision = source.Revision
-		}
-		if source.Environment != "" {
-			currentTag.Environment = source.Environment
-		}
-		// Add other fields as needed
+// CookbookURL sets the cookbook URL for the current cluster.
+func CookbookURL(val string) {
+	if currentCluster != nil {
+		currentCluster.CookbookURL = val
+	}
+}
+
+// NodeRolloutBatchSize sets the node rollout batch size for the current cluster.
+func NodeRolloutBatchSize(val string) {
+	if currentCluster != nil {
+		currentCluster.NodeRolloutBatchSize = val
+	}
+}
+
+// SlackChannels sets the slack channels for the current cluster.
+func SlackChannels(vals ...string) {
+	if currentCluster != nil {
+		currentCluster.SlackChannels = vals
+	}
+}
+
+// AdditionalSshTeams sets the additional SSH teams for the current cluster.
+func AdditionalSshTeams(vals ...string) {
+	if currentCluster != nil {
+		currentCluster.AdditionalSshTeams = vals
+	}
+}
+
+// NodegroupsDef defines the nodegroups for the current cluster.
+func NodegroupsDef(dsl func()) {
+	if currentCluster != nil {
+		currentCluster.Nodegroups = &Nodegroups{}
+		inNodegroups(currentCluster.Nodegroups, dsl)
+	}
+}
+
+// EtcdMember defines the etcd-member nodegroup.
+func EtcdMember(dsl func()) {
+	if currentNodegroups != nil {
+		currentNodegroups.EtcdMember = &Nodegroup{}
+		inNodegroup(currentNodegroups.EtcdMember, dsl)
+	}
+}
+
+// EtcdEventsMember defines the etcd-events-member nodegroup.
+func EtcdEventsMember(dsl func()) {
+	if currentNodegroups != nil {
+		currentNodegroups.EtcdEventsMember = &Nodegroup{}
+		inNodegroup(currentNodegroups.EtcdEventsMember, dsl)
+	}
+}
+
+// Api defines the api nodegroup.
+func Api(dsl func()) {
+	if currentNodegroups != nil {
+		currentNodegroups.Api = &Nodegroup{}
+		inNodegroup(currentNodegroups.Api, dsl)
+	}
+}
+
+// Node defines the node nodegroup.
+func Node(dsl func()) {
+	if currentNodegroups != nil {
+		currentNodegroups.Node = &Nodegroup{}
+		inNodegroup(currentNodegroups.Node, dsl)
+	}
+}
+
+// Autoscale sets the autoscale property for the current nodegroup.
+func Autoscale(val bool) {
+	if currentNodegroup != nil {
+		currentNodegroup.Autoscale = &val
+	}
+}
+
+// Type sets the type for the current nodegroup.
+func Type(val string) {
+	if currentNodegroup != nil {
+		currentNodegroup.Type = val
+	}
+}
+
+// RootEbsSize sets the root EBS size for the current nodegroup.
+func RootEbsSize(val string) {
+	if currentNodegroup != nil {
+		currentNodegroup.RootEbsSize = val
+	}
+}
+
+// MaxSize sets the max size for the current nodegroup.
+func MaxSize(val int) {
+	if currentNodegroup != nil {
+		currentNodegroup.MaxSize = &val
+	}
+}
+
+// ScaleDownGracePeriod sets the scale down grace period for the current nodegroup.
+func ScaleDownGracePeriod(val string) {
+	if currentNodegroup != nil {
+		currentNodegroup.ScaleDownGrace = val
+	}
+}
+
+// DrainTimeoutNodegroup sets the drain timeout for the current nodegroup.
+func DrainTimeoutNodegroup(val string) {
+	if currentNodegroup != nil {
+		currentNodegroup.DrainTimeout = val
+	}
+}
+
+// InstanceTypes sets the instance types for the current nodegroup.
+func InstanceTypes(vals ...string) {
+	if currentNodegroup != nil {
+		currentNodegroup.InstanceTypes = vals
+	}
+}
+
+// DefaultAttributesDef defines the default attributes for the current cluster.
+func DefaultAttributesDef(dsl func()) {
+	if currentCluster != nil {
+		currentCluster.DefaultAttributes = &DefaultAttributes{}
+		inDefaultAttributes(currentCluster.DefaultAttributes, dsl)
+	}
+}
+
+// ClusterAttribute sets the cluster attribute within default_attributes.
+func ClusterAttribute(val string) {
+	if currentDefaultAttributes != nil {
+		currentDefaultAttributes.Cluster = val
 	}
 }
 
@@ -280,18 +317,39 @@ func ToYAML(data *ClusterMetadata) (string, error) {
 	return string(yamlData), nil
 }
 
-// inTag is a helper to set the context for attribute setters.
-func inTag(tag *AMITag, dsl func()) {
-	original := currentTag
-	currentTag = tag
-	dsl()
-	currentTag = original
-}
+// --- Context Helpers ---
 
-// inCluster is a helper to set the context for cluster attribute setters.
 func inCluster(cluster *Cluster, dsl func()) {
 	original := currentCluster
 	currentCluster = cluster
 	dsl()
 	currentCluster = original
+}
+
+func inAmiTag(tag *AMITag, dsl func()) {
+	original := currentAmiTag
+	currentAmiTag = tag
+	dsl()
+	currentAmiTag = original
+}
+
+func inNodegroups(ngs *Nodegroups, dsl func()) {
+	original := currentNodegroups
+	currentNodegroups = ngs
+	dsl()
+	currentNodegroups = original
+}
+
+func inNodegroup(ng *Nodegroup, dsl func()) {
+	original := currentNodegroup
+	currentNodegroup = ng
+	dsl()
+	currentNodegroup = original
+}
+
+func inDefaultAttributes(da *DefaultAttributes, dsl func()) {
+	original := currentDefaultAttributes
+	currentDefaultAttributes = da
+	dsl()
+	currentDefaultAttributes = original
 }

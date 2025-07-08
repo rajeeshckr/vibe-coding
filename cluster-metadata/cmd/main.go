@@ -8,84 +8,57 @@ import (
 )
 
 var Design = Run(func() {
-	TagsDef(func() {
-		AmiRevisionMain("1f5915df9330551ceb673d198d7ec2c458d6e3a8")
-		AmiRevisionBranch("1990f8966675bd0bdf9172e916eca2739303a4f1")
+	ClusterDef(func() {
+		Name("sandbox")
+		Partition("sandbox")
+		Env("staging")
+		Region("us-west-2")
 
-		Envs(func() {
-			ProductionAmiEnv(func() {
-				Environment("production")
-			})
-			StagingAmiEnv(func() {
-				Environment("staging")
-			})
-		})
-
-		Providers(func() {
-			Chef(func() {
-				Hostgroup("k8s-singlemount")
-			})
-			Eks(func() {
-				Hostgroup("k8s-eks")
-			})
-		})
-
-		Platforms(func() {
-			Ubuntu2204(func() {
-				Arm64(func() {
-					Platform("ubuntu-graviton-22.04")
-				})
-				Amd64(func() {
-					Platform("ubuntu-22.04")
-				})
-			})
-		})
-
-		BaseNames(func() {
-			EksArm64(func() {
-				BaseName("ubuntu22.04_eks_base_arm")
-			})
-			EksAmd64(func() {
-				BaseName("ubuntu22.04_eks_base")
-			})
-			SfnAmd64(func() {
-				BaseName("ubuntu22.04_k8s_base_singlemount")
-			})
-			SfnArm64(func() {
-				BaseName("ubuntu22.04_k8s_base_singlemount_arm")
-			})
-		})
-	})
-
-	VarsDef(func() {
-		// This shows how to reuse definitions, similar to YAML anchors.
-		// We get the definitions from the already-processed `Tags` section
-		// by accessing the exported `Definition` object from the dsl package.
-		productionAmiEnv := Definition.Tags.Envs.ProductionAmiEnv
-		amiRevisionMain := Definition.Tags.AmiRevisionMain
-
-		SandboxAmd64Ami(func() {
-			Merge(productionAmiEnv)
-			Merge(amiRevisionMain)
+		Amd64AmiTags(func() {
+			Environment("production")
+			Revision("1f5915df9330551ceb673d198d7ec2c458d6e3a8")
 			BaseName("ubuntu22.04_k8s_base_singlemount_cgroupv2")
 		})
 
-		SandboxArm64Ami(func() {
-			Merge(productionAmiEnv)
-			Merge(amiRevisionMain)
+		Arm64AmiTags(func() {
+			Environment("production")
+			Revision("1f5915df9330551ceb673d198d7ec2c458d6e3a8")
 			BaseName("ubuntu22.04_k8s_base_singlemount_arm_cgroupv2")
 		})
 
-		SandboxEksAmd64Ami(func() {
-			Merge(productionAmiEnv)
-			Merge(amiRevisionMain)
-			BaseName("ubuntu22.04_eks_base_cgroupv2")
-		})
-	})
+		CookbookURL("<%= ENV['COOKBOOK_URL'].to_json %>")
+		NodeRolloutBatchSize(`<%= ENV["NODE_ROLLOUT_BATCH_SIZE"] || "50%" %>`)
+		SlackChannels("compute-cluster-deploys-staging")
+		AdditionalSshTeams("engineering")
 
-	ClusterDef(func() {
-		Name("pod998")
-		Partition("pod998")
+		NodegroupsDef(func() {
+			EtcdMember(func() {
+				Autoscale(false)
+				Type("etcd")
+				RootEbsSize("100")
+			})
+			EtcdEventsMember(func() {
+				Autoscale(false)
+				Type("etcd-events")
+				RootEbsSize("100")
+			})
+			Api(func() {
+				Autoscale(false)
+				DrainTimeoutNodegroup("15m")
+				RootEbsSize("100")
+				InstanceTypes("m7g.2xlarge", "m6g.2xlarge")
+			})
+			Node(func() {
+				MaxSize(10)
+				ScaleDownGracePeriod("30s")
+				DrainTimeoutNodegroup("1h")
+				InstanceTypes("m7i-flex.2xlarge", "t3.2xlarge", "m7i.2xlarge", "m6i.2xlarge")
+			})
+		})
+
+		DefaultAttributesDef(func() {
+			ClusterAttribute("pod998") // Mismatch in source yaml, using pod998 from default_attributes
+		})
 	})
 })
 
