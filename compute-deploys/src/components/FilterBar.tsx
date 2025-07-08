@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import MultiSelect from './MultiSelect';
 import type { Option } from './MultiSelect';
 import type { MultiValue } from 'react-select';
@@ -7,14 +7,15 @@ interface FilterBarProps {
   onSearch: () => void;
 }
 
-const clusterOptions: Option[] = [
-  { value: 'cluster-1', label: 'Cluster 1' },
-  { value: 'cluster-2', label: 'Cluster 2' },
-  { value: 'cluster-3', label: 'Cluster 3' },
-];
-
 const FilterBar: React.FC<FilterBarProps> = ({ onSearch }) => {
+  const [clusterOptions, setClusterOptions] = useState<Option[]>([]);
   const [selectedClusters, setSelectedClusters] = useState<Option[]>([]);
+
+  useEffect(() => {
+    fetch('/api/clusters')
+      .then(res => res.json())
+      .then(data => setClusterOptions(data));
+  }, []);
 
   const handleClusterChange = (selected: MultiValue<Option>) => {
     setSelectedClusters(selected as Option[]);
