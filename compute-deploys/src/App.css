@@ -1,3 +1,57 @@
+/* App.css */
+
+.App {
+  font-family: sans-serif;
+  text-align: center;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-bar select,
+.filter-bar input,
+.filter-bar button {
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.filter-bar button {
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+th {
+  background-color: #e0e0e0;
+  font-weight: bold;
+}
+
+/* tr:nth-child(even) {
+  background-color: #f9f9f9;
+} */
+
+tr:hover {
+  background-color: #f5f5f5;
+}
+
 #root {
   max-width: 1280px;
   margin: 0 auto;
@@ -39,4 +93,9 @@
 
 .read-the-docs {
   color: #888;
+}
+
+.results-container {
+  max-height: 500px;
+  overflow-y: auto;
 }
