@@ -15,8 +15,8 @@ const FilterBar: React.FC<FilterBarProps> = ({ onSearch }) => {
         <option>Service 1</option>
         <option>Service 2</option>
       </select>
-      <input type="date" />
-      <input type="date" />
+      <input type="datetime-local" />
+      <input type="datetime-local" />
       <button onClick={onSearch}>Search</button>
     </div>
   );
