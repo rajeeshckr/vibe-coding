@@ -29,16 +29,29 @@ app.post('/api/search', async (req, res) => {
   console.log('Received /api/search request with body:', req.body);
   const { clusters, services, startDate, endDate } = req.body;
 
-  if (!clusters || clusters.length === 0 || !services || services.length === 0 || !startDate || !endDate) {
-    return res.status(400).json({ error: 'Missing required filter parameters. Please select at least one cluster and one service.' });
+  if (!services || services.length === 0 || !startDate || !endDate) {
+    return res.status(400).json({ error: 'Missing required filter parameters. Please select at least one service and a date range.' });
   }
 
-  // Use the first selected cluster and service
-  const clusterName = clusters[0].value;
   const serviceName = services[0].name;
 
-  // Construct the specific query
-  const query = `@requestObject.metadata.annotations.moniker.spinnaker.io/cluster:${clusterName} service:k8s_audit_logs @objectRef.namespace:kube-system @objectRef.resource:daemonsets @objectRef.name:${serviceName} @user.username:"system:serviceaccount:spinnaker:spinnaker-remote" @verb:update`;
+  // Base query parts
+  const queryParts = [
+    `service:k8s_audit_logs`,
+    `@objectRef.namespace:kube-system`,
+    `@objectRef.resource:daemonsets`,
+    `@objectRef.name:${serviceName}`,
+    `@user.username:"system:serviceaccount:spinnaker:spinnaker-remote"`,
+    `@verb:update`
+  ];
+
+  // Conditionally add the cluster filter if a cluster is selected
+  if (clusters && clusters.length > 0) {
+    const clusterName = clusters[0].value;
+    queryParts.unshift(`@requestObject.metadata.annotations.moniker.spinnaker.io/cluster:${clusterName}`);
+  }
+
+  const query = queryParts.join(' ');
 
   // Function to format date to ISO string with +10:00 offset
   const formatToAEST = (dateString) => {
