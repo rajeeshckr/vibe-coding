@@ -15,7 +15,6 @@ const DD_APP_KEY = process.env.DD_APP_KEY;
 
 app.get('/api/clusters', (req, res) => {
   console.log('Fetching clusters...');
-  res.setHeader('Cache-Control', 'no-store');
   exec("kubectl get ClusterInfo -A --context pod998 -ojson | jq '.items[] | select (.metadata.name!=\"current\") | .metadata.name'", (error, stdout, stderr) => {
     if (error) {
       console.error(`exec error: ${error}`);
@@ -39,7 +38,7 @@ app.post('/api/search', async (req, res) => {
   const serviceName = services[0].name;
 
   // Construct the specific query
-  const query = `kube_cluster_id:${clusterName} service:k8s_audit_logs @objectRef.namespace:kube-system @objectRef.resource:daemonsets @objectRef.name:${serviceName} @user.username:"system:serviceaccount:spinnaker:spinnaker-remote" @verb:update`;
+  const query = `@requestObject.metadata.annotations.moniker.spinnaker.io/cluster:${clusterName} service:k8s_audit_logs @objectRef.namespace:kube-system @objectRef.resource:daemonsets @objectRef.name:${serviceName} @user.username:"system:serviceaccount:spinnaker:spinnaker-remote" @verb:update`;
 
   // Function to format date to ISO string with +10:00 offset
   const formatToAEST = (dateString) => {

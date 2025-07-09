@@ -13,6 +13,9 @@ interface LogAttributes {
         project?: string;
         role?: string;
       };
+      annotations?: {
+        'moniker.spinnaker.io/cluster'?: string;
+      };
     };
   };
   // Add other potential properties to avoid TypeScript errors
@@ -69,6 +72,7 @@ const ResultsGrid: React.FC<ResultsGridProps> = ({ results, loading, error }) =>
           <th>Product</th>
           <th>Project</th>
           <th>Role</th>
+          <th>Cluster</th>
         </tr>
       </thead>
       <tbody>
@@ -81,6 +85,7 @@ const ResultsGrid: React.FC<ResultsGridProps> = ({ results, loading, error }) =>
               <td>{attrs.requestObject?.metadata?.labels?.product ?? 'N/A'}</td>
               <td>{attrs.requestObject?.metadata?.labels?.project ?? 'N/A'}</td>
               <td>{attrs.requestObject?.metadata?.labels?.role ?? 'N/A'}</td>
+              <td>{attrs.requestObject?.metadata?.annotations?.moniker?.spinnaker?.['io/cluster'] ?? 'N/A'}</td>
             </tr>
           );
         })}
