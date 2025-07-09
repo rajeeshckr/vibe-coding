@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 import axios from 'axios';
 import dotenv from 'dotenv';
 
-dotenv.config(); // Load environment variables from .env file
+dotenv.config({ override: true }); // Will override existing shell variables
 
 const app = express();
 const port = 3001;
