@@ -2,18 +2,20 @@ import { useState, useEffect } from 'react';
 import './App.css';
 import FilterBar from './components/FilterBar';
 import ResultsGrid from './components/ResultsGrid';
+import type { Option } from './components/MultiSelect';
+import type { DatadogLog } from './components/ResultsGrid'; // Import the type
 
-interface Result {
+interface Service {
   name: string;
-  product: string;
-  project: string;
-  role: string;
-  cluster: string;
+  namespace: string;
+  kind: string;
 }
 
 function App() {
-  const [results, setResults] = useState<Result[]>([]);
+  const [results, setResults] = useState<DatadogLog[]>([]); // Use DatadogLog type
   const [scale, setScale] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -27,28 +29,47 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleSearch = () => {
-    // Mock API call
-    const mockResults: Result[] = [
-      { name: 'service-a', product: 'Product A', project: 'Project X', role: 'backend', cluster: 'Cluster 1' },
-      { name: 'service-b', product: 'Product B', project: 'Project Y', role: 'frontend', cluster: 'Cluster 1' },
-      { name: 'service-c', product: 'Product A', project: 'Project Z', role: 'backend', cluster: 'Cluster 2' },
-      { name: 'service-d', product: 'Product C', project: 'Project X', role: 'backend', cluster: 'Cluster 1' },
-      { name: 'service-e', product: 'Product B', project: 'Project Y', role: 'frontend', cluster: 'Cluster 2' },
-      { name: 'service-f', product: 'Product C', project: 'Project Z', role: 'backend', cluster: 'Cluster 2' },
-      { name: 'service-g', product: 'Product A', project: 'Project X', role: 'frontend', cluster: 'Cluster 1' },
-      { name: 'service-h', product: 'Product B', project: 'Project Z', role: 'backend', cluster: 'Cluster 2' },
-      { name: 'service-i', product: 'Product A', project: 'Project Y', role: 'frontend', cluster: 'Cluster 1' },
-      { name: 'service-j', product: 'Product C', project: 'Project X', role: 'backend', cluster: 'Cluster 2' },
-    ];
-    setResults(mockResults);
+  const handleSearch = (filters: { clusters: Option[], services: Option[], from: string, to: string }) => {
+    setLoading(true);
+    setError(null);
+    const { clusters, services, from, to } = filters;
+    fetch('/api/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ clusters, services, startDate: from, endDate: to }),
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.text().then(text => { throw new Error(text || 'Network response was not ok') });
+        }
+        return res.json();
+      })
+      .then(data => {
+        // The API returns { data: [...] }, so we access data.data
+        if (data && data.data) {
+          setResults(data.data);
+        } else {
+          setResults([]);
+        }
+      })
+      .catch(err => {
+        setError(err.message);
+        setResults([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   };
 
   return (
-    <div className="App" style={{ transform: `scale(${scale})`, transformOrigin: 'top' }}>
-      <FilterBar onSearch={handleSearch} />
-      <div className="results-container">
-        <ResultsGrid results={results} />
+    <div className="app-container" style={{ transform: `scale(${scale})` }}>
+      <div className="app">
+        <FilterBar onSearch={handleSearch} />
+        <div className="results-grid-container">
+          <ResultsGrid results={results} loading={loading} error={error} />
+        </div>
       </div>
     </div>
   );
